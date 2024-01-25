@@ -223,8 +223,43 @@ router.get("/fetch-student-details/:schoolId/:userId", async (req, res) => {
   }
 });
 
+// New route for fetching subjects
+router.get('/get-subjects', async (req, res) => {
+  console.log('Received request to /api/get-subjects');
+  try {
+    await userDao.fetchSubjects(req, res);
+  } catch (error) {
+    console.error('Error fetching subjects:', error);
+    res.status(500).json({ error: 'Internal Server Error' });
+  }
+});
+
+// New route for fetching classes
+router.get('/get-classes', async (req, res) => {
+  console.log('Received request to /api/get-classes');
+  try {
+    await userDao.fetchClasses(req, res);
+  } catch (error) {
+    console.error('Error fetching classes:', error);
+    res.status(500).json({ error: 'Internal Server Error' });
+  }
+});
 
 
+/////////////////////////////////////////
+//---------Testing Code-----------------
+/////////////////////////////////////////
+
+
+router.post('/create-course', async (req, res) => {
+  console.log('Received request to /api/create-course');
+  try {
+    await userDao.createCourse(req, res);
+  } catch (error) {
+    console.error('Error creating course:', error);
+    res.status(500).json({ error: 'Internal Server Error' });
+  }
+});
 
 // Export the router
 module.exports = router;
