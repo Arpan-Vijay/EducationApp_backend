@@ -773,6 +773,53 @@ exports.fetchClasses = function (request, response) {
   }
 };
 
+// Function to create a new course and insert into the database
+exports.createCourse = async function (request, response) {
+  try {
+    const { courseName, courseDescription, subjectId, classId } = request.body;
+    console.log('Received Data:', { courseName, courseDescription, subjectId, classId });
+
+    // Get the token from the request headers
+    const token = request.headers.authorization.split(' ')[1]; // Assuming the token is sent in the Authorization header
+
+    // Verify the token
+    jwt.verify(token, process.env.SECRET_KEY, async (err, decoded) => {
+      if (err) {
+        // Token verification failed
+        console.error("Token verification failed:", err);
+        return response.status(401).json({ message: "Unauthorized" });
+      }
+
+      // Token verified successfully, extract user_id
+      const userId = decoded.user_id;
+
+      // Insert into the database
+      const connection = connectionProvider.mysqlConnectionStringProvider.getMysqlConnection();
+      const insertQuery = `
+        INSERT INTO courses_info (user_id, course_name, course_description, subject_id, class_id)
+        VALUES (?, ?, ?, ?, ?)
+      `;
+      const insertQueryPayload = [userId, courseName, courseDescription, subjectId, classId];
+
+      connection.query(insertQuery, insertQueryPayload, (err, result) => {
+        connectionProvider.mysqlConnectionStringProvider.closeMysqlConnection(connection);
+
+        if (err) {
+          console.error('Error executing database query:', err);
+          return response.status(500).json({ error: err.message });
+        }
+
+        // Send a success response
+        response.json({ success: true, message: 'Course created successfully' });
+      });
+    });
+  } catch (error) {
+    console.error('Error creating course:', error);
+    response.status(500).json({ error: 'Internal Server Error' });
+  }
+};
+
+
 ///////////////////////////
 //------Admin Portal ------
 ///////////////////////////
@@ -956,6 +1003,8 @@ exports.fetchTeachersForSchool = function (request, response) {
   teachers_info.first_name,
   teachers_info.last_name,
   teachers_info.contact_number,
+  teachers_info.email,
+  teachers_info.birthday,
   GROUP_CONCAT(DISTINCT subjects_info.subject_name) AS subjects_taught,
   GROUP_CONCAT(DISTINCT classes_info.class_name) AS classes_taught
 FROM
@@ -964,7 +1013,7 @@ LEFT JOIN teachers_info ON login.user_id = teachers_info.user_id
 LEFT JOIN courses_info ON login.user_id = courses_info.user_id
 LEFT JOIN subjects_info ON courses_info.subject_id = subjects_info.subject_id
 LEFT JOIN chapters_info ON courses_info.course_id = chapters_info.course_id
-LEFT JOIN classes_info ON chapters_info.class_id = classes_info.class_id
+LEFT JOIN classes_info ON courses_info.class_id = classes_info.class_id
 WHERE
   login.school_id = ? AND login.role = 'teacher'
 GROUP BY
@@ -976,7 +1025,9 @@ GROUP BY
   
   teachers_info.first_name,
   teachers_info.last_name,
-  teachers_info.contact_number;
+  teachers_info.contact_number,
+  teachers_info.email,
+  teachers_info.birthday;
   
   `;
 
@@ -1038,7 +1089,7 @@ GROUP BY
 //   });
 // };
 
-  exports.addTeacher = function (request, response) {
+exports.addTeacher = function (request, response) {
     const connection =
       connectionProvider.mysqlConnectionStringProvider.getMysqlConnection();
 
@@ -1071,6 +1122,8 @@ GROUP BY
           motherName,
           emergencyContactName,
           emergencyContactNumber,
+          classId,
+          subjectId,
         } = request.body;
 
         const schoolId = request.params.schoolId;
@@ -1123,7 +1176,7 @@ GROUP BY
               father_name,
               mother_name,
               emergency_contact_name,
-              emergency_contact_number
+              emergency_contact_number,
             )
             VALUES (?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?);
           `;
@@ -1216,10 +1269,13 @@ exports.fetchStudentsForSchool = function (request, response) {
       students_info.permanent_address,
       students_info.city,
       students_info.state,
-      students_info.account_number
+      students_info.account_number,
+      mentors_info.mentor_first_name,
+      mentors_info.mentor_last_name
     FROM
       login
     LEFT JOIN students_info ON login.user_id = students_info.user_id
+    LEFT JOIN mentors_info ON mentors_info.mentor_id = students_info.mentor_id
     WHERE
       login.school_id = ? AND login.role = 'student';
   `;
@@ -1275,14 +1331,16 @@ exports.addStudent = function (request, response) {
         guardianName,
         guardianNumber,
         guardianEmail,
-        //account details
+        // account details
         accountHolderName,
         bankName,
         accountNumber,
         ifscCode,
-        accountType
-
+        accountType,
+        // Mentor Id
+        mentorId,
       } = request.body;
+      console.log('Add Student Data : ',request.body)
 
       const schoolId = request.params.schoolId;
 
@@ -1291,7 +1349,7 @@ exports.addStudent = function (request, response) {
 
       // Generate sap_id and password
       const sapId = generateRandomSapId();
-      const password = sapId; // Assuming password should be the same as sap_id
+      const password = sapId;
       console.log("Generated SAP ID:", sapId);
       console.log("Generated Password:", password);
 
@@ -1315,87 +1373,77 @@ exports.addStudent = function (request, response) {
           });
         }
 
-        const insertStudentQuery = `
-          INSERT INTO students_info (
-            user_id,
-            first_name,
-            middle_name,
-            last_name,
+          const insertStudentQuery = `
+            INSERT INTO students_info (
+              user_id,
+              first_name,
+              middle_name,
+              last_name,
+              gender,
+              birthday,
+              email,
+              contact_number,
+              alternative_number,
+              aadhar_card_number,
+              permanent_address,
+              city,
+              state,
+              father_name,
+              father_contact_number,
+              father_email,
+              mother_name,
+              mother_contact_number,
+              mother_email,
+              guardian_name,
+              guardian_number,
+              guardian_email,
+              account_holder_name,
+              bank_name,
+              account_number,
+              ifsc_code,
+              account_type,
+              mentor_id 
+            )
+            VALUES (?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?);
+          `;
+
+          const insertStudentPayload = [
+            result.insertId, // Use the ID generated in the login query
+            firstName,
+            middleName,
+            lastName,
             gender,
             birthday,
             email,
-            contact_number,
-            alternative_number,
-            aadhar_card_number,
-            permanent_address,
+            contactNumber,
+            alternativeNumber,
+            aadharCardNumber,
+            permanentAddress,
             city,
             state,
-            father_name,
-            father_contact_number,
-            father_email,
-            mother_name,
-            mother_contact_number,
-            mother_email,
-            guardian_name,
-            guardian_number,
-            guardian_email,
-            account_holder_name,
-            bank_name,
-            account_number,
-            ifsc_code,
-            account_type
-          )
-          VALUES (?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ? , ?, ?, ?, ?, ?);
-        `;
+            fatherName,
+            fatherContactNumber,
+            fatherEmail,
+            motherName,
+            motherContactNumber,
+            motherEmail,
+            guardianName,
+            guardianNumber,
+            guardianEmail,
+            accountHolderName,
+            bankName,
+            accountNumber,
+            ifscCode,
+            accountType,
+            mentorId, 
+          ];
 
-        const insertStudentPayload = [
-          result.insertId, // Use the ID generated in the login query
-          firstName,
-          middleName,
-          lastName,
-          gender,
-          birthday,
-          email,
-          contactNumber,
-          alternativeNumber,
-          aadharCardNumber,
-          permanentAddress,
-          city,
-          state,
-          fatherName,
-          fatherContactNumber,
-          fatherEmail,
-          motherName,
-          motherContactNumber,
-          motherEmail,
-          guardianName,
-          guardianNumber,
-          guardianEmail,
-          accountHolderName,
-          bankName,
-          accountNumber,
-          ifscCode,
-          accountType
-            
-        ];
-
-        connection.query(
-          insertStudentQuery,
-          insertStudentPayload,
-          (err, result) => {
-            if (err) {
-              console.error("Error executing student query:", err);
-              return connection.rollback(function () {
-                connectionProvider.mysqlConnectionStringProvider.closeMysqlConnection(
-                  connection
-                );
-                response.status(500).json({ error: err.message });
-              });
-            }
-
-            connection.commit(function (err) {
+          connection.query(
+            insertStudentQuery,
+            insertStudentPayload,
+            (err, result) => {
               if (err) {
-                console.error("Error committing transaction:", err);
+                console.error("Error executing student query:", err);
                 return connection.rollback(function () {
                   connectionProvider.mysqlConnectionStringProvider.closeMysqlConnection(
                     connection
@@ -1404,14 +1452,26 @@ exports.addStudent = function (request, response) {
                 });
               }
 
-              console.log("Transaction completed successfully");
-              connectionProvider.mysqlConnectionStringProvider.closeMysqlConnection(
-                connection
-              );
-              response.json({ message: "Student added successfully" });
-            });
-          }
-        );
+              connection.commit(function (err) {
+                if (err) {
+                  console.error("Error committing transaction:", err);
+                  return connection.rollback(function () {
+                    connectionProvider.mysqlConnectionStringProvider.closeMysqlConnection(
+                      connection
+                    );
+                    response.status(500).json({ error: err.message });
+                  });
+                }
+
+                console.log("Transaction completed successfully");
+                connectionProvider.mysqlConnectionStringProvider.closeMysqlConnection(
+                  connection
+                );
+                response.json({ message: "Student added successfully" });
+              });
+            }
+          );
+        // });
       });
     } catch (error) {
       console.error("Error adding student:", error);
@@ -1424,6 +1484,7 @@ exports.addStudent = function (request, response) {
     }
   });
 };
+
 
 exports.fetchTeacherDetails = function (request, response) {
   const userId = request.params.userId; // Updated parameter name to userId
@@ -1500,6 +1561,127 @@ function generateRandomSapId() {
   return result;
 }
 
+exports.fetchAllMentorsData = function (request, response) {
+  try {
+    const connection =
+      connectionProvider.mysqlConnectionStringProvider.getMysqlConnection();
+
+    const selectQuery = `
+      SELECT *
+      FROM mentors_info;
+    `;
+
+    connection.query(selectQuery, (err, rows, fields) => {
+      connectionProvider.mysqlConnectionStringProvider.closeMysqlConnection(
+        connection
+      );
+
+      if (err) {
+        console.error("Error executing database query:", err);
+        return response.status(500).json({ error: err.message });
+      }
+
+      console.log("Mentors Data:", rows);
+      response.json({ mentorsData: rows });
+    });
+  } catch (error) {
+    console.error("Error fetching mentors data:", error);
+    response.status(500).json({ error: "Internal Server Error" });
+  }
+};
+
+exports.addMentor = function (request, response) {
+  try {
+    const {
+      mentorFirstName,
+      mentorMiddleName,
+      mentorLastName,
+      email,
+      aadharCard,
+      birthdate,
+      contactNumber,
+      alternativeContactNumber,
+      permanentAddress,
+      city,
+      state,
+    } = request.body;
+
+    const connection =
+      connectionProvider.mysqlConnectionStringProvider.getMysqlConnection();
+
+    const insertQuery = `
+      INSERT INTO mentors_info (
+        mentor_first_name,
+        mentor_middle_name,
+        mentor_last_name,
+        email,
+        aadhar_card,
+        birthdate,
+        contact_number,
+        alternative_contact_number,
+        permanent_address,
+        city,
+        state
+      )
+      VALUES (?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?);
+    `;
+
+    const insertQueryPayload = [
+      mentorFirstName,
+      mentorMiddleName,
+      mentorLastName,
+      email,
+      aadharCard,
+      birthdate,
+      contactNumber,
+      alternativeContactNumber,
+      permanentAddress,
+      city,
+      state,
+    ];
+
+    connection.query(insertQuery, insertQueryPayload, (err, result) => {
+      connectionProvider.mysqlConnectionStringProvider.closeMysqlConnection(
+        connection
+      );
+
+      if (err) {
+        console.error("Error executing database query:", err);
+        return response.status(500).json({ error: err.message });
+      }
+
+      console.log("Mentor added successfully");
+      response.json({ message: "Mentor added successfully" });
+    });
+  } catch (error) {
+    console.error("Error adding mentor:", error);
+    response.status(500).json({ error: "Internal Server Error" });
+  }
+};
+
+// Function to fetch all mentors' names and IDs
+exports.fetchMentors = function (request, response) {
+  try {
+    const connection =
+      connectionProvider.mysqlConnectionStringProvider.getMysqlConnection();
+
+    const selectQuery = 'SELECT mentor_id, CONCAT(mentor_first_name, " ", mentor_last_name) AS mentor_name FROM mentors_info';
+    
+    connection.query(selectQuery, (err, rows, fields) => {
+      connectionProvider.mysqlConnectionStringProvider.closeMysqlConnection(connection);
+
+      if (err) {
+        console.error('Error executing database query:', err);
+        return response.status(500).json({ error: err.message });
+      }
+
+      response.json({ mentors: rows });
+    });
+  } catch (error) {
+    console.error('Error fetching mentors:', error);
+    response.status(500).json({ error: 'Internal Server Error' });
+  }
+};
 
 
 // ------------------------Working Code ---------------------------------------
@@ -1507,48 +1689,4 @@ function generateRandomSapId() {
 // ------------------------Testing Code ---------------------------------------
 
 
-// Function to create a new course and insert into the database
-exports.createCourse = async function (request, response) {
-  try {
-    const { courseName, courseDescription, subjectId, classId } = request.body;
-    console.log('Received Data:', { courseName, courseDescription, subjectId, classId });
 
-    // Get the token from the request headers
-    const token = request.headers.authorization.split(' ')[1]; // Assuming the token is sent in the Authorization header
-
-    // Verify the token
-    jwt.verify(token, process.env.SECRET_KEY, async (err, decoded) => {
-      if (err) {
-        // Token verification failed
-        console.error("Token verification failed:", err);
-        return response.status(401).json({ message: "Unauthorized" });
-      }
-
-      // Token verified successfully, extract user_id
-      const userId = decoded.user_id;
-
-      // Insert into the database
-      const connection = connectionProvider.mysqlConnectionStringProvider.getMysqlConnection();
-      const insertQuery = `
-        INSERT INTO courses_info (user_id, course_name, course_description, subject_id, class_id)
-        VALUES (?, ?, ?, ?, ?)
-      `;
-      const insertQueryPayload = [userId, courseName, courseDescription, subjectId, classId];
-
-      connection.query(insertQuery, insertQueryPayload, (err, result) => {
-        connectionProvider.mysqlConnectionStringProvider.closeMysqlConnection(connection);
-
-        if (err) {
-          console.error('Error executing database query:', err);
-          return response.status(500).json({ error: err.message });
-        }
-
-        // Send a success response
-        response.json({ success: true, message: 'Course created successfully' });
-      });
-    });
-  } catch (error) {
-    console.error('Error creating course:', error);
-    response.status(500).json({ error: 'Internal Server Error' });
-  }
-};

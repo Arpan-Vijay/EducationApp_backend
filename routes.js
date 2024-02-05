@@ -245,12 +245,6 @@ router.get('/get-classes', async (req, res) => {
   }
 });
 
-
-/////////////////////////////////////////
-//---------Testing Code-----------------
-/////////////////////////////////////////
-
-
 router.post('/create-course', async (req, res) => {
   console.log('Received request to /api/create-course');
   try {
@@ -260,6 +254,51 @@ router.post('/create-course', async (req, res) => {
     res.status(500).json({ error: 'Internal Server Error' });
   }
 });
+
+// New route for fetching all mentors data
+router.get("/fetch-all-mentors-data", async (req, res) => {
+  console.log("Received request to /fetch-all-mentors-data");
+  try {
+    await userDao.fetchAllMentorsData(req, res);
+  } catch (error) {
+    console.error("Error fetching mentors data:", error);
+    res.status(500).json({ error: "Internal Server Error" });
+  }
+});
+
+
+// New route for adding a new mentor
+router.post("/add-mentor", async (req, res) => {
+  console.log("Received request to /add-mentor");
+  try {
+    await userDao.addMentor(req, res);
+  } catch (error) {
+    console.error("Error adding mentor:", error);
+    res.status(500).json({ error: "Internal Server Error" });
+  }
+});
+
+
+// New route for fetching mentors
+router.get('/get-mentors', async (req, res) => {
+  console.log('Received request to /api/get-mentors');
+  try {
+    await userDao.fetchMentors(req, res);
+  } catch (error) {
+    console.error('Error fetching mentors:', error);
+    res.status(500).json({ error: 'Internal Server Error' });
+  }
+});
+
+
+/////////////////////////////////////////
+//---------Testing Code-----------------
+/////////////////////////////////////////
+
+
+// routes.js
+
+
 
 // Export the router
 module.exports = router;
