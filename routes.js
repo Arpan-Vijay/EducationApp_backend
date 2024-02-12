@@ -1,6 +1,107 @@
 const express = require("express");
 const router = express.Router();
 const userDao = require("./server/Dao/usersDao.js");
+const multer = require("multer");
+const path = require("path");
+
+// Set up multer storage
+// const storage = multer.memoryStorage(); // You can adjust storage as per your requirements
+
+const storage = multer.diskStorage({
+  destination: function (req, file, cb) {
+    cb(null, path.join(__dirname, "./server/uploads/"));
+  },
+  filename: function (req, file, cb) {
+    cb(null, Date.now() + "-" + file.originalname);
+  },
+});
+
+const existingUpload = multer({
+  storage: storage,
+  limits: {
+    fileSize: 1024 * 1024 * 5, // 5 MB limit (adjust as needed)
+  },
+});
+
+/////////////////////////////////////////
+//--------- S3 Bucket-----------------
+/////////////////////////////////////////
+
+router.post(
+  "/upload-profile-image/:userId",
+  existingUpload.single("image"),
+  async (req, res) => {
+    console.log("Received request to /upload-profile-image/:userId");
+
+    try {
+      // Extract the userId from the URL parameters
+      const userId = req.params.userId;
+      console.log("User ID:", userId);
+
+      // Call the uploadProfileImage function in userDao.js
+      await userDao.uploadProfileImage(req, res);
+    } catch (error) {
+      console.error("Error uploading profile image:", error);
+      res.status(500).json({ error: "Internal Server Error" });
+    }
+  }
+);
+
+router.put(
+  "/update-profile-image/:userId",
+  existingUpload.single("image"),
+  async (req, res) => {
+    console.log("Received request to /update-profile-image/:userId");
+
+    try {
+      // Extract the userId from the URL parameters
+      const userId = req.params.userId;
+      console.log("User ID:", userId);
+
+      // Call the updateProfileImage function in userDao.js
+      await userDao.updateProfileImage(req, res);
+    } catch (error) {
+      console.error("Error updating profile image:", error);
+      res.status(500).json({ error: "Internal Server Error" });
+    }
+  }
+);
+
+router.get("/retrieve-profile-image/:userId", async (req, res) => {
+  console.log("Received request to /retrieve-profile-image/:userId");
+
+  try {
+    // Extract the userId from the URL parameters
+    const userId = req.params.userId;
+    console.log("User ID:", userId);
+
+    // Call the retrieveProfileImage function in userDao.js
+    await userDao.retrieveProfileImage(req, res);
+  } catch (error) {
+    console.error("Error retrieving profile image:", error);
+    res.status(500).json({ error: "Internal Server Error" });
+  }
+});
+
+router.delete("/delete-profile-image/:userId", async (req, res) => {
+  console.log("Received request to /delete-profile-image/:userId");
+
+  try {
+    // Extract the userId from the URL parameters
+    const userId = req.params.userId;
+    console.log("User ID:", userId);
+
+    // Call the deleteProfileImage function in userDao.js
+    await userDao.deleteProfileImage(req, res);
+  } catch (error) {
+    console.error("Error deleting profile image:", error);
+    res.status(500).json({ error: "Internal Server Error" });
+  }
+});
+
+/////////////////////////////////////////////////////////
+//------Login and Reset Password Functions ------
+/////////////////////////////////////////////////////////
 
 router.post("/check-email-exists", async (req, res) => {
   try {
@@ -71,7 +172,11 @@ router.post("/reset-password", async (req, res) => {
   }
 });
 
-// New route for fetching user data
+///////////////////////////
+//------Teacher Portal ------
+///////////////////////////
+
+// New route for fetching teacher data
 router.post("/fetch-user-data", async (req, res) => {
   console.log("Received request to /fetch-user-data");
   try {
@@ -81,6 +186,12 @@ router.post("/fetch-user-data", async (req, res) => {
     res.status(500).json({ error: "Internal Server Error" });
   }
 });
+
+///////////////////////////
+//------Admin Portal ------
+///////////////////////////
+
+// ----------School Related --------------
 
 // New route for fetching school data
 router.get("/fetch-school-data", async (req, res) => {
@@ -93,7 +204,6 @@ router.get("/fetch-school-data", async (req, res) => {
   }
 });
 
-// routes.js (backend)
 router.get("/fetch-school-data/:schoolId", async (req, res) => {
   console.log("Received request to /fetch-school-data/:schoolId");
   try {
@@ -126,6 +236,30 @@ router.post("/add-school", async (req, res) => {
   }
 });
 
+// New route for deleting a school
+router.delete("/delete-school", async (req, res) => {
+  console.log("Received request to /delete-school");
+  try {
+    await userDao.deleteSchool(req, res);
+  } catch (error) {
+    console.error("Error deleting school:", error);
+    res.status(500).json({ error: "Internal Server Error" });
+  }
+});
+
+// New route for updating school information
+router.put("/update-school", async (req, res) => {
+  console.log("Received request to /update-school");
+  try {
+    await userDao.updateSchool(req, res);
+  } catch (error) {
+    console.error("Error updating school:", error);
+    res.status(500).json({ error: "Internal Server Error" });
+  }
+});
+
+// ---------- Teacher Related --------------
+
 // Add new routes for fetching teachers and students for a specific school
 router.get("/fetch-teachers/:schoolId", async (req, res) => {
   console.log("Received request to /fetch-teachers/:schoolId");
@@ -137,16 +271,24 @@ router.get("/fetch-teachers/:schoolId", async (req, res) => {
   }
 });
 
-router.get("/fetch-students/:schoolId", async (req, res) => {
-  console.log("Received request to /fetch-students/:schoolId");
+// Add a new route for fetching teacher details
+router.get("/fetch-teacher-details/:schoolId/:userId", async (req, res) => {
+  console.log("Received request to /fetch-teacher-details/:schoolId/:userId");
   try {
-    await userDao.fetchStudentsForSchool(req, res);
+    // Extract the schoolId and userId from the URL parameters
+    const { userId, schoolId } = req.params;
+
+    // Attach the schoolId , userId to the request body
+    req.body.userId = userId;
+    req.body.schoolId = schoolId;
+
+    // Call the fetchTeacherDetails function in userDao.js
+    await userDao.fetchTeacherDetails(req, res);
   } catch (error) {
-    console.error("Error fetching students data:", error);
+    console.error("Error fetching teacher details:", error);
     res.status(500).json({ error: "Internal Server Error" });
   }
 });
-
 
 router.post("/add-teacher/:schoolId", async (req, res) => {
   console.log("Received request to /add-teacher/:schoolId");
@@ -161,6 +303,69 @@ router.post("/add-teacher/:schoolId", async (req, res) => {
     await userDao.addTeacher(req, res);
   } catch (error) {
     console.error("Error adding teacher:", error);
+    res.status(500).json({ error: "Internal Server Error" });
+  }
+});
+
+// New route for updating teacher information
+router.put("/update-teacher/", async (req, res) => {
+  console.log("Received request to /update-teacher");
+  try {
+    await userDao.updateTeacher(req, res);
+  } catch (error) {
+    console.error("Error updating teacher:", error);
+    res.status(500).json({ error: "Internal Server Error" });
+  }
+});
+
+// New route for deleting teacher
+router.delete("/delete-teacher", async (req, res) => {
+  console.log("Received request to /delete-teacher");
+  try {
+    await userDao.deleteTeacher(req, res);
+  } catch (error) {
+    console.error("Error deleting teacher:", error);
+    res.status(500).json({ error: "Internal Server Error" });
+  }
+});
+
+router.post("/create-course", async (req, res) => {
+  console.log("Received request to /api/create-course");
+  try {
+    await userDao.createCourse(req, res);
+  } catch (error) {
+    console.error("Error creating course:", error);
+    res.status(500).json({ error: "Internal Server Error" });
+  }
+});
+
+// ------------ Student Related -------------
+
+router.get("/fetch-students/:schoolId", async (req, res) => {
+  console.log("Received request to /fetch-students/:schoolId");
+  try {
+    await userDao.fetchStudentsForSchool(req, res);
+  } catch (error) {
+    console.error("Error fetching students data:", error);
+    res.status(500).json({ error: "Internal Server Error" });
+  }
+});
+
+// Add a new route for fetching student details
+router.get("/fetch-student-details/:schoolId/:userId", async (req, res) => {
+  console.log("Received request to /fetch-student-details/:schoolId/:userId");
+  try {
+    // Extract the schoolId and userId from the URL parameters
+    const { userId, schoolId } = req.params;
+
+    // Attach the schoolId , userId to the request body
+    req.body.userId = userId;
+    req.body.schoolId = schoolId;
+
+    // Call the fetchStudentDetails function in userDao.js
+    await userDao.fetchStudentDetails(req, res);
+  } catch (error) {
+    console.error("Error fetching student details:", error);
     res.status(500).json({ error: "Internal Server Error" });
   }
 });
@@ -183,75 +388,60 @@ router.post("/add-student/:schoolId", async (req, res) => {
   }
 });
 
-
-// Add a new route for fetching teacher details
-router.get("/fetch-teacher-details/:schoolId/:userId", async (req, res) => {
-  console.log("Received request to /fetch-teacher-details/:schoolId/:userId");
+// New route for updating student information
+router.put("/update-student", async (req, res) => {
+  console.log("Received request to /update-student");
   try {
-    // Extract the schoolId and userId from the URL parameters
-    const { userId, schoolId } = req.params;
-
-    // Attach the schoolId , userId to the request body
-    req.body.userId = userId;
-    req.body.schoolId = schoolId;
-
-    // Call the fetchTeacherDetails function in userDao.js
-    await userDao.fetchTeacherDetails(req, res);
+    await userDao.updateStudent(req, res);
   } catch (error) {
-    console.error("Error fetching teacher details:", error);
+    console.error("Error updating student:", error);
     res.status(500).json({ error: "Internal Server Error" });
   }
 });
 
-
-// Add a new route for fetching student details
-router.get("/fetch-student-details/:schoolId/:userId", async (req, res) => {
-  console.log("Received request to /fetch-student-details/:schoolId/:userId");
+// New route for deleting student
+router.delete("/delete-student", async (req, res) => {
+  console.log("Received request to /delete-student");
   try {
-    // Extract the schoolId and userId from the URL parameters
-    const { userId, schoolId } = req.params;
-
-    // Attach the schoolId , userId to the request body
-    req.body.userId = userId;
-    req.body.schoolId = schoolId;
-
-    // Call the fetchStudentDetails function in userDao.js
-    await userDao.fetchStudentDetails(req, res);
+    await userDao.deleteStudent(req, res);
   } catch (error) {
-    console.error("Error fetching student details:", error);
+    console.error("Error deleting student:", error);
     res.status(500).json({ error: "Internal Server Error" });
   }
 });
 
 // New route for fetching subjects
-router.get('/get-subjects', async (req, res) => {
-  console.log('Received request to /api/get-subjects');
+router.get("/get-subjects", async (req, res) => {
+  console.log("Received request to /api/get-subjects");
   try {
     await userDao.fetchSubjects(req, res);
   } catch (error) {
-    console.error('Error fetching subjects:', error);
-    res.status(500).json({ error: 'Internal Server Error' });
+    console.error("Error fetching subjects:", error);
+    res.status(500).json({ error: "Internal Server Error" });
   }
 });
 
 // New route for fetching classes
-router.get('/get-classes', async (req, res) => {
-  console.log('Received request to /api/get-classes');
+router.get("/get-classes", async (req, res) => {
+  console.log("Received request to /api/get-classes");
   try {
     await userDao.fetchClasses(req, res);
   } catch (error) {
-    console.error('Error fetching classes:', error);
-    res.status(500).json({ error: 'Internal Server Error' });
+    console.error("Error fetching classes:", error);
+    res.status(500).json({ error: "Internal Server Error" });
   }
 });
 
-router.post('/create-course', async (req, res) => {
-  console.log('Received request to /api/create-course');
+// ------------ Mentor Related -------------
+
+// New route for fetching mentors
+router.get("/get-mentors", async (req, res) => {
+  console.log("Received request to /api/get-mentors");
   try {
-    await userDao.createCourse(req, res);
+    await userDao.fetchMentors(req, res);
   } catch (error) {
-    console.error('Error creating course:', error);
-    res.status(500).json({ error: 'Internal Server Error' });
+    console.error("Error fetching mentors:", error);
+    res.status(500).json({ error: "Internal Server Error" });
   }
 });
 
@@ -266,7 +456,6 @@ router.get("/fetch-all-mentors-data", async (req, res) => {
   }
 });
 
-
 // New route for adding a new mentor
 router.post("/add-mentor", async (req, res) => {
   console.log("Received request to /add-mentor");
@@ -278,27 +467,70 @@ router.post("/add-mentor", async (req, res) => {
   }
 });
 
-
-// New route for fetching mentors
-router.get('/get-mentors', async (req, res) => {
-  console.log('Received request to /api/get-mentors');
+// New route for updating a mentor
+router.put("/update-mentor", async (req, res) => {
+  console.log("Received request to /update-mentor");
   try {
-    await userDao.fetchMentors(req, res);
+    await userDao.updateMentor(req, res);
   } catch (error) {
-    console.error('Error fetching mentors:', error);
-    res.status(500).json({ error: 'Internal Server Error' });
+    console.error("Error updating mentor:", error);
+    res.status(500).json({ error: "Internal Server Error" });
   }
 });
 
+// New route for deleting a mentor
+router.delete("/delete-mentor", async (req, res) => {
+  console.log("Received request to /delete-mentor");
+  try {
+    await userDao.deleteMentor(req, res);
+  } catch (error) {
+    console.error("Error deleting mentor:", error);
+    res.status(500).json({ error: "Internal Server Error" });
+  }
+});
+
+router.get("/fetch-mentor-details/:mentorId", async (req, res) => {
+  console.log("Received request to /fetch-mentor-details/:mentorId");
+  try {
+    // Extract the mentorId from the URL parameters
+    const { mentorId } = req.params;
+
+    // Attach the mentorId to the request body
+    req.body.mentorId = mentorId;
+
+    // Call the fetchMentorDetails function in userDao.js
+    await userDao.fetchMentorDetails(req, res);
+  } catch (error) {
+    console.error("Error fetching mentor details:", error);
+    res.status(500).json({ error: "Internal Server Error" });
+  }
+});
+
+// // New route for updating teacher information
+// router.put("/update-teacher/", async (req, res) => {
+//   console.log("Received request to /update-teacher");
+//   try {
+//     await userDao.updateTeacher(req, res);
+//   } catch (error) {
+//     console.error("Error updating teacher:", error);
+//     res.status(500).json({ error: "Internal Server Error" });
+//   }
+// });
+
+// // New route for deleting teacher
+// router.delete("/delete-teacher", async (req, res) => {
+//   console.log("Received request to /delete-teacher");
+//   try {
+//     await userDao.deleteTeacher(req, res);
+//   } catch (error) {
+//     console.error("Error deleting teacher:", error);
+//     res.status(500).json({ error: "Internal Server Error" });
+//   }
+// });
 
 /////////////////////////////////////////
 //---------Testing Code-----------------
 /////////////////////////////////////////
-
-
-// routes.js
-
-
 
 // Export the router
 module.exports = router;

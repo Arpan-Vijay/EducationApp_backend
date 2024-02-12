@@ -1,19 +1,28 @@
 const connectionProvider = require("../mySqlConnectionStringProvider.js");
 const jwt = require("jsonwebtoken");
 const XLSX = require("xlsx");
-const fs = require("fs");
 const { getSignedUrl } = require("@aws-sdk/s3-request-presigner");
 const bcrypt = require("bcrypt");
 const { promisify } = require("util");
 const nodemailer = require("nodemailer");
 const { query } = require("express");
 const sendEmail = require("./emailSender");
+
+const dotenv = require("dotenv");
+const multer = require('multer');
+const path = require('path');
+const fs = require('fs').promises;
+
+dotenv.config();
+
 const {
   S3Client,
   PutObjectCommand,
   GetObjectCommand,
   DeleteObjectCommand,
 } = require("@aws-sdk/client-s3");
+
+
 const s3Client = new S3Client({
   region: process.env.AWS_REGION,
   credentials: {
@@ -21,13 +30,16 @@ const s3Client = new S3Client({
     secretAccessKey: process.env.AWS_SECRET_ACCESS_KEY,
   },
 });
+
 // const AWS = require('aws-sdk');
+
+const AWS = require('aws-sdk');
 
 const pool = require("../mySqlConnectionString.js"); // Assuming you have a separate file for creating a connection pool
 
 const unlinkAsync = promisify(fs.unlink);
 
-// const unlinkAsync = promisify(fs.unlink);
+
 
 exports.uploadOrgIcon = async function (req, res) {
   const path = req.file.path;
@@ -35,27 +47,6 @@ exports.uploadOrgIcon = async function (req, res) {
   const params = {
     Bucket: "embed-app-bucket",
     Key: "OrgIcon-" + req.params.orgId,
-    Body: fileContent,
-  };
-
-  const command = new PutObjectCommand(params);
-
-  try {
-    const response = await s3Client.send(command);
-    console.log("Image uploaded successfully. Location:", response);
-    await unlinkAsync(path);
-    res.status(200).send({ message: "uploaded successfully" });
-  } catch (error) {
-    console.error("Error uploading image:", error);
-  }
-};
-
-exports.uploadProfileImage = async function (req, res) {
-  const path = req.file.path;
-  const fileContent = fs.readFileSync(path);
-  const params = {
-    Bucket: "embed-app-bucket",
-    Key: "Image-" + req.body.userDetails.adminId,
     Body: fileContent,
   };
 
@@ -89,44 +80,157 @@ exports.retrieveOrgIcon = async function (req, res) {
   }
 };
 
-exports.retrieveProfileImage = async function (req, res) {
-  const params = {
-    Bucket: "embed-app-bucket",
-    Key: "Image-" + req.body.userDetails.adminId,
-    ResponseContentType: "image/jpeg",
-  };
-
-  const command = new GetObjectCommand(params);
-
-  try {
-    // const response = await s3Client.send(command);
-    // const imageFile = response.Body;
-    const url = await getSignedUrl(s3Client, command, { expiresIn: 3600 });
-    console.log("Image retrieved successfully.", url);
-    res.status(200).send({ dataUrl: url });
-  } catch (error) {
-    console.error("Error retrieving image:", error);
-  }
-};
-
-exports.deleteProfileImage = async function (req, res) {
-  const deleteParams = {
-    Bucket: "embed-app-bucket",
-    Key: "testImage.jpg",
-  };
-
-  const deleteCommand = new DeleteObjectCommand(deleteParams);
-
-  try {
-    const data = await s3Client.send(deleteCommand);
-    console.log("Object deleted successfully");
-    res.status(200).send({ message: "uploaded successfully" });
-  } catch (error) {
-    console.error("Error deleting object:", error);
-  }
-};
 
 // ------------------------ Working Code ---------------------------------------
+
+
+/////////////////////////////////////////////////////////
+//------S3 Bucket ------
+/////////////////////////////////////////////////////////
+
+const storage = multer.diskStorage({
+  destination: async function (req, file, cb) {
+    try {
+      const uploadFolder = path.join(__dirname, "./server/uploads/");
+      console.log("Destination Folder:", uploadFolder);
+      await fs.mkdir(uploadFolder, { recursive: true }); 
+      cb(null, uploadFolder);
+    } catch (error) {
+      console.error("Error creating destination folder:", error);
+      cb(error, null);
+    }
+  },
+  filename: function (req, file, cb) {
+    const timestamp = Date.now();
+    console.log("File Name:", timestamp + "-" + file.originalname);
+    cb(null, timestamp + "-" + file.originalname);
+  },
+});
+
+exports.upload = multer({ storage: storage });
+
+
+exports.uploadProfileImage = async function (req, res) {
+  try {
+    const path = req.file.path;
+    const fileContent = await fs.readFile(path);
+    console.log("PATH: ",path)
+    const userId = req.params.userId;
+
+    const params = {
+      Bucket: "embed-app-bucket",
+      Key: `Image-EdApp:${userId}`, // Use userId in the S3 key
+      Body: fileContent,
+    };
+
+    const command = new PutObjectCommand(params);
+
+    const response = await s3Client.send(command);
+    console.log("Image uploaded successfully. Location:", response);
+
+    // Clean up: Delete local file after successful upload
+    await fs.unlink(path);
+
+    res.status(200).send({ message: "uploaded successfully" });
+  } catch (error) {
+    console.error("Error uploading image:", error);
+    res.status(500).send({ error: "Internal Server Error" });
+  }
+};
+
+exports.updateProfileImage = async function (req, res) {
+  try {
+    const userId = req.params.userId;
+
+    // Construct S3 key based on userId
+    const updateParams = {
+      Bucket: "embed-app-bucket",
+      Key: `Image-EdApp:${userId}`,
+    };
+
+    // Assuming you have the updated image file in the request
+    const updatedFilePath = req.file.path;
+    const updatedFileContent = await fs.readFile(updatedFilePath);
+
+    updateParams.Body = updatedFileContent;
+
+    const updateCommand = new PutObjectCommand(updateParams);
+
+    // Send the update command to S3
+    const updateResponse = await s3Client.send(updateCommand);
+
+    // Log the response from S3 (optional)
+    console.log("Update Object Response:", updateResponse);
+
+    // Clean up: Delete local file after successful update
+    await fs.unlink(updatedFilePath);
+
+    console.log("Object updated successfully");
+    res.status(200).send({ message: "updated successfully" });
+  } catch (error) {
+    console.error("Error updating object:", error);
+    res.status(500).send({ error: "Internal Server Error" });
+  }
+};
+
+exports.retrieveProfileImage = async function (req, res) {
+  try {
+    const userId = req.params.userId;
+
+    // Construct S3 key based on userId
+    const retrieveParams = {
+      Bucket: "embed-app-bucket",
+      Key: `Image-EdApp:${userId}`,
+    };
+
+    const retrieveCommand = new GetObjectCommand(retrieveParams);
+
+    // Generate a signed URL for the S3 object
+    const signedUrl = await getSignedUrl(s3Client, retrieveCommand, { expiresIn: 3600 });
+
+    console.log("Image retrieved successfully.", signedUrl);
+
+    // Redirect the client to the signed URL
+    res.redirect(302, signedUrl);
+  } catch (error) {
+    console.error("Error retrieving image:", error);
+    res.status(500).send({ error: "Internal Server Error" });
+  }
+};
+
+
+exports.deleteProfileImage = async function (req, res) {
+  try {
+    const userId = req.params.userId;
+
+    // Construct S3 key based on userId
+    const deleteParams = {
+      Bucket: "embed-app-bucket",
+      Key: `Image-EdApp:${userId}`,
+    };
+
+    const deleteCommand = new DeleteObjectCommand(deleteParams);
+
+    // Send the delete command to S3
+    const deleteResponse = await s3Client.send(deleteCommand);
+
+    // Log the response from S3 (optional)
+    console.log("Delete Object Response:", deleteResponse);
+
+    console.log("Object deleted successfully");
+    res.status(200).send({ message: "deleted successfully" });
+  } catch (error) {
+    console.error("Error deleting object:", error);
+    res.status(500).send({ error: "Internal Server Error" });
+  }
+};
+
+
+
+/////////////////////////////////////////////////////////
+//------Login and Reset Password Functions ------
+/////////////////////////////////////////////////////////
+
 
 exports.adminLogin = function (request, response) {
   const connection =
@@ -246,130 +350,6 @@ exports.userLogin = function (request, response) {
     }
   );
 };
-
-// function proceedWithAuthentication(response, user) {
-//   // Continue with authentication logic
-
-//   const role = user.role; // Extract user role
-
-//   // Generate JWT token with data from login table
-//   const resToSend = {
-//     user_id: user.user_id,
-//     school_id: user.school_id,
-//     sap_id: user.sap_id,
-//     school_name: user.school_name,
-//     role: role,
-//     first_name: user.first_name,
-//     last_name: user.last_name,
-//     middle_name: user.middle_name,
-//     email: user.email,
-//     birthdate: user.birthdate,
-//     contact_number: user.contact_number,
-//     alternative_contact_number: user.alternative_contact_number,
-//     permanent_address: user.permanent_address,
-//     city: user.city,
-//     state: user.state,
-//   };
-
-//   // If the user is a teacher, fetch additional data from teachers_info
-//   if (role === "teacher") {
-//     const additionalDataQuery = `SELECT * FROM teachers_info WHERE user_id = ${user.user_id}`;
-//     const connection =
-//       connectionProvider.mysqlConnectionStringProvider.getMysqlConnection();
-
-//     connection.query(additionalDataQuery, function (err, rows, fields) {
-//       if (err) {
-//         console.log("Error fetching additional data:", err);
-//         response.status(500).send("Internal Server Error");
-//         connectionProvider.mysqlConnectionStringProvider.closeMysqlConnection(
-//           connection
-//         );
-//         return;
-//       }
-
-//       if (rows.length === 1) {
-//         // Include additional data in the JWT token
-//         Object.assign(resToSend, rows[0]);
-
-//         // Update the redirect URL
-//         const redirectUrl = `/home/schoolId=${resToSend.school_id}/teacherId=${resToSend.teacher_id}`;
-//         resToSend.redirectUrl = redirectUrl;
-//       }
-
-//       // Assuming 'token' is the JWT token
-//       const token = jwt.sign(resToSend, process.env.SECRET_KEY, {
-//         expiresIn: "50m",
-//       });
-
-//       const responsePayload = {
-//         success: true,
-//         message: "Authentication Successful",
-//         token: token,
-//         redirectUrl: resToSend.redirectUrl, // Add the redirect URL to the response
-//       };
-
-//       response.json(responsePayload);
-//       connectionProvider.mysqlConnectionStringProvider.closeMysqlConnection(
-//         connection
-//       );
-//     });
-//   } else if (role === "student") {
-//     // If the user is a student, fetch additional data from students_info
-//     const additionalDataQuery = `SELECT * FROM students_info WHERE user_id = ${user.user_id}`;
-//     const connection =
-//       connectionProvider.mysqlConnectionStringProvider.getMysqlConnection();
-
-//     connection.query(additionalDataQuery, function (err, rows, fields) {
-//       if (err) {
-//         console.log("Error fetching additional data:", err);
-//         response.status(500).send("Internal Server Error");
-//         connectionProvider.mysqlConnectionStringProvider.closeMysqlConnection(
-//           connection
-//         );
-//         return;
-//       }
-
-//       if (rows.length === 1) {
-//         // Include additional data in the JWT token
-//         Object.assign(resToSend, rows[0]);
-
-//         // Update the redirect URL
-//         const redirectUrl = `/home/schoolId=${resToSend.school_id}/studentId=${resToSend.student_id}`;
-//         resToSend.redirectUrl = redirectUrl;
-//       }
-
-//       // Assuming 'token' is the JWT token
-//       const token = jwt.sign(resToSend, process.env.SECRET_KEY, {
-//         expiresIn: "50m",
-//       });
-
-//       const responsePayload = {
-//         success: true,
-//         message: "Authentication Successful",
-//         token: token,
-//         redirectUrl: resToSend.redirectUrl, // Add the redirect URL to the response
-//       };
-
-//       response.json(responsePayload);
-//       connectionProvider.mysqlConnectionStringProvider.closeMysqlConnection(
-//         connection
-//       );
-//     });
-//   } else {
-//     // If the role is neither teacher nor student, generate JWT token directly
-//     const token = jwt.sign(resToSend, process.env.SECRET_KEY, {
-//       expiresIn: "50m",
-//     });
-
-//     const responsePayload = {
-//       success: true,
-//       message: "Authentication Successful",
-//       token: token,
-//     };
-
-//     response.json(responsePayload);
-//   }
-// }
 
 
 function proceedWithAuthentication(response, user) {
@@ -521,55 +501,22 @@ async function sendOTPByEmail(email, otp) {
   await sendEmail(email, subject, content);
 }
 
-// Helper function to store OTP in the database
+
 async function storeOTPInDatabase(email, otp, expiryTime) {
   const connection =
     connectionProvider.mysqlConnectionStringProvider.getMysqlConnection();
 
   return new Promise(async (resolve, reject) => {
-    // Fetch Contact_Number from the login database
-    const contactNumberQuery =
-      "SELECT contact_number FROM login WHERE email = ?";
-    const contactNumberResults = await queryDatabase(contactNumberQuery, [
-      email,
-    ]);
+    // Store the OTP, email, and expiry time in the otps database
+    const query =
+      "INSERT INTO otps (email, otp, expiry_time) VALUES (?, ?, ?)";
+    const queryPayload = [email, otp, expiryTime];
 
-    if (contactNumberResults.length === 1) {
-      const contactNumber = contactNumberResults[0].Contact_Number;
-
-      // Store the OTP, email, expiry time, and contact number in the otps database
-      const query =
-        "INSERT INTO otps (email, otp, expiry_time, contact_number) VALUES (?, ?, ?, ?)";
-      const queryPayload = [email, otp, expiryTime, contactNumber];
-
-      connection.query(query, queryPayload, (error) => {
-        if (error) {
-          reject(error);
-        } else {
-          resolve();
-        }
-      });
-    } else {
-      reject(new Error("Contact_Number not found for the given email"));
-    }
-
-    connectionProvider.mysqlConnectionStringProvider.closeMysqlConnection(
-      connection
-    );
-  });
-}
-
-// Helper function to execute a query on the database
-async function queryDatabase(query, params) {
-  const connection =
-    connectionProvider.mysqlConnectionStringProvider.getMysqlConnection();
-
-  return new Promise((resolve, reject) => {
-    connection.query(query, params, (error, results) => {
+    connection.query(query, queryPayload, (error) => {
       if (error) {
         reject(error);
       } else {
-        resolve(results);
+        resolve();
       }
     });
 
@@ -578,6 +525,65 @@ async function queryDatabase(query, params) {
     );
   });
 }
+
+// VIA CONTACT NUMBER IN THE DATABASE
+// Helper function to store OTP in the database
+// async function storeOTPInDatabase(email, otp, expiryTime) {
+//   const connection =
+//     connectionProvider.mysqlConnectionStringProvider.getMysqlConnection();
+
+//   return new Promise(async (resolve, reject) => {
+//     // Fetch Contact_Number from the login database
+//     const contactNumberQuery =
+//       "SELECT contact_number FROM login WHERE email = ?";
+//     const contactNumberResults = await queryDatabase(contactNumberQuery, [
+//       email,
+//     ]);
+
+//     if (contactNumberResults.length === 1) {
+//       const contactNumber = contactNumberResults[0].Contact_Number;
+
+//       // Store the OTP, email, expiry time, and contact number in the otps database
+//       const query =
+//         "INSERT INTO otps (email, otp, expiry_time, contact_number) VALUES (?, ?, ?, ?)";
+//       const queryPayload = [email, otp, expiryTime, contactNumber];
+
+//       connection.query(query, queryPayload, (error) => {
+//         if (error) {
+//           reject(error);
+//         } else {
+//           resolve();
+//         }
+//       });
+//     } else {
+//       reject(new Error("Contact_Number not found for the given email"));
+//     }
+
+//     connectionProvider.mysqlConnectionStringProvider.closeMysqlConnection(
+//       connection
+//     );
+//   });
+// }
+
+// Helper function to execute a query on the database
+// async function queryDatabase(query, params) {
+//   const connection =
+//     connectionProvider.mysqlConnectionStringProvider.getMysqlConnection();
+
+//   return new Promise((resolve, reject) => {
+//     connection.query(query, params, (error, results) => {
+//       if (error) {
+//         reject(error);
+//       } else {
+//         resolve(results);
+//       }
+//     });
+
+//     connectionProvider.mysqlConnectionStringProvider.closeMysqlConnection(
+//       connection
+//     );
+//   });
+// }
 
 // Function to store OTP in the database and send it to the user's email
 exports.sendOTP = async function (email) {
@@ -670,6 +676,11 @@ exports.resetPassword = async function (email, newPassword) {
   });
 };
 
+///////////////////////////
+//------Teacher Portal ------
+///////////////////////////
+
+
 // Function to fetch teacher portal's all courses / publish courses details
 exports.fetchUserData = function (request, response) {
   try {
@@ -729,50 +740,6 @@ exports.fetchUserData = function (request, response) {
   }
 };
 
-// Function to fetch all subjects
-exports.fetchSubjects = function (request, response) {
-  try {
-    const connection = connectionProvider.mysqlConnectionStringProvider.getMysqlConnection();
-    const selectQuery = 'SELECT subject_id, subject_name FROM subjects_info';
-    
-    connection.query(selectQuery, (err, rows, fields) => {
-      connectionProvider.mysqlConnectionStringProvider.closeMysqlConnection(connection);
-
-      if (err) {
-        console.error('Error executing database query:', err);
-        return response.status(500).json({ error: err.message });
-      }
-
-      response.json({ subjects: rows });
-    });
-  } catch (error) {
-    console.error('Error fetching subjects:', error);
-    response.status(500).json({ error: 'Internal Server Error' });
-  }
-};
-
-// Function to fetch all classes
-exports.fetchClasses = function (request, response) {
-  try {
-    const connection = connectionProvider.mysqlConnectionStringProvider.getMysqlConnection();
-    const selectQuery = 'SELECT class_id, class_name FROM classes_info';
-    
-    connection.query(selectQuery, (err, rows, fields) => {
-      connectionProvider.mysqlConnectionStringProvider.closeMysqlConnection(connection);
-
-      if (err) {
-        console.error('Error executing database query:', err);
-        return response.status(500).json({ error: err.message });
-      }
-
-      response.json({ classes: rows });
-    });
-  } catch (error) {
-    console.error('Error fetching classes:', error);
-    response.status(500).json({ error: 'Internal Server Error' });
-  }
-};
-
 // Function to create a new course and insert into the database
 exports.createCourse = async function (request, response) {
   try {
@@ -819,10 +786,56 @@ exports.createCourse = async function (request, response) {
   }
 };
 
+// Function to fetch all subjects
+exports.fetchSubjects = function (request, response) {
+  try {
+    const connection = connectionProvider.mysqlConnectionStringProvider.getMysqlConnection();
+    const selectQuery = 'SELECT subject_id, subject_name FROM subjects_info';
+    
+    connection.query(selectQuery, (err, rows, fields) => {
+      connectionProvider.mysqlConnectionStringProvider.closeMysqlConnection(connection);
+
+      if (err) {
+        console.error('Error executing database query:', err);
+        return response.status(500).json({ error: err.message });
+      }
+
+      response.json({ subjects: rows });
+    });
+  } catch (error) {
+    console.error('Error fetching subjects:', error);
+    response.status(500).json({ error: 'Internal Server Error' });
+  }
+};
+
+// Function to fetch all classes
+exports.fetchClasses = function (request, response) {
+  try {
+    const connection = connectionProvider.mysqlConnectionStringProvider.getMysqlConnection();
+    const selectQuery = 'SELECT class_id, class_name FROM classes_info';
+    
+    connection.query(selectQuery, (err, rows, fields) => {
+      connectionProvider.mysqlConnectionStringProvider.closeMysqlConnection(connection);
+
+      if (err) {
+        console.error('Error executing database query:', err);
+        return response.status(500).json({ error: err.message });
+      }
+
+      response.json({ classes: rows });
+    });
+  } catch (error) {
+    console.error('Error fetching classes:', error);
+    response.status(500).json({ error: 'Internal Server Error' });
+  }
+};
+
 
 ///////////////////////////
 //------Admin Portal ------
 ///////////////////////////
+
+// ----------School Related --------------
 
 exports.fetchSchoolData = function (request, response) {
   try {
@@ -833,6 +846,8 @@ exports.fetchSchoolData = function (request, response) {
       SELECT
         schools_info.school_id,
         schools_info.school_name,
+        schools_info.principal_name,
+        schools_info.contact_number,
         COUNT(login.user_id) AS total_users,
         SUM(CASE WHEN login.role = 'teacher' THEN 1 ELSE 0 END) AS total_teachers,
         SUM(CASE WHEN login.role = 'student' THEN 1 ELSE 0 END) AS total_students
@@ -858,6 +873,33 @@ exports.fetchSchoolData = function (request, response) {
     console.error("Error fetching school data:", error);
     response.status(500).json({ error: "Internal Server Error" });
   }
+};
+
+exports.fetchSchoolDetails = function (request, response) {
+  const schoolId = request.params.schoolId;
+
+  const connection =
+    connectionProvider.mysqlConnectionStringProvider.getMysqlConnection();
+
+  const selectQuery = `
+    SELECT *
+    FROM schools_info
+    WHERE school_id = ?;
+  `;
+
+  connection.query(selectQuery, [schoolId], (err, rows, fields) => {
+    connectionProvider.mysqlConnectionStringProvider.closeMysqlConnection(
+      connection
+    );
+
+    if (err) {
+      console.error("Error executing database query:", err);
+      return response.status(500).json({ error: err.message });
+    }
+
+    console.log("School Details:", rows[0]);
+    response.json({ schoolDetails: rows[0] });
+  });
 };
 
 exports.addSchool = function (request, response) {
@@ -923,31 +965,100 @@ exports.addSchool = function (request, response) {
   }
 };
 
-exports.fetchSchoolDetails = function (request, response) {
-  const schoolId = request.params.schoolId;
+exports.updateSchool = function (request, response) {
+  try {
+    const {
+      schoolId,
+      schoolName,
+      schoolAddress,
+      schoolDocumentNumber,
+      principalName,
+      city,
+      state,
+      zipCode,
+      contactNumber,
+      alternativeNumber,
+    } = request.body;
 
-  const connection =
-    connectionProvider.mysqlConnectionStringProvider.getMysqlConnection();
+    const connection =
+      connectionProvider.mysqlConnectionStringProvider.getMysqlConnection();
 
-  const selectQuery = `
-    SELECT *
-    FROM schools_info
-    WHERE school_id = ?;
-  `;
+    const updateQuery = `
+      UPDATE schools_info
+      SET
+        school_name = ?,
+        school_address = ?,
+        school_document_number = ?,
+        principal_name = ?,
+        city = ?,
+        state = ?,
+        zip_code = ?,
+        contact_number = ?,
+        alternative_number = ?
+      WHERE school_id = ?;
+    `;
 
-  connection.query(selectQuery, [schoolId], (err, rows, fields) => {
-    connectionProvider.mysqlConnectionStringProvider.closeMysqlConnection(
-      connection
-    );
+    const updateQueryPayload = [
+      schoolName,
+      schoolAddress,
+      schoolDocumentNumber,
+      principalName,
+      city,
+      state,
+      zipCode,
+      contactNumber,
+      alternativeNumber,
+      schoolId,
+    ];
 
-    if (err) {
-      console.error("Error executing database query:", err);
-      return response.status(500).json({ error: err.message });
-    }
+    connection.query(updateQuery, updateQueryPayload, (err, result) => {
+      connectionProvider.mysqlConnectionStringProvider.closeMysqlConnection(
+        connection
+      );
 
-    console.log("School Details:", rows[0]);
-    response.json({ schoolDetails: rows[0] });
-  });
+      if (err) {
+        console.error("Error executing database query:", err);
+        return response.status(500).json({ error: err.message });
+      }
+
+      console.log("School updated successfully");
+      response.json({ message: "School updated successfully" });
+    });
+  } catch (error) {
+    console.error("Error updating school:", error);
+    response.status(500).json({ error: "Internal Server Error" });
+  }
+};
+
+exports.deleteSchool = function (request, response) {
+  try {
+    const { schoolId } = request.body;
+
+    const connection =
+      connectionProvider.mysqlConnectionStringProvider.getMysqlConnection();
+
+    const deleteQuery = `
+      DELETE FROM schools_info
+      WHERE school_id = ?;
+    `;
+
+    connection.query(deleteQuery, [schoolId], (err, result) => {
+      connectionProvider.mysqlConnectionStringProvider.closeMysqlConnection(
+        connection
+      );
+
+      if (err) {
+        console.error("Error executing database query:", err);
+        return response.status(500).json({ error: err.message });
+      }
+
+      console.log("School deleted successfully");
+      response.json({ message: "School deleted successfully" });
+    });
+  } catch (error) {
+    console.error("Error deleting school:", error);
+    response.status(500).json({ error: "Internal Server Error" });
+  }
 };
 
 // Function to fetch user counts for a specific school
@@ -985,6 +1096,10 @@ exports.fetchUserCounts = function (request, response) {
     response.status(500).json({ error: "Internal Server Error" });
   }
 };
+
+
+// ------------ Teacher Related -------------
+
 
 exports.fetchTeachersForSchool = function (request, response) {
   const schoolId = request.params.schoolId;
@@ -1046,49 +1161,6 @@ GROUP BY
   });
 };
 
-// exports.fetchStudentsForSchool = function (request, response) {
-//   const schoolId = request.params.schoolId;
-
-//   const connection =
-//     connectionProvider.mysqlConnectionStringProvider.getMysqlConnection();
-
-//   const selectQuery = `
-//     SELECT
-//       login.user_id,
-//       login.sap_id,
-//       students_info.first_name,
-//       students_info.last_name,
-//       students_info.contact_number,
-//       students_info.father_name,
-//       students_info.mother_name,
-//       students_info.guardian_name,
-//       students_info.email,
-//       students_info.aadhar_card_number,
-//       students_info.permanent_address,
-//       students_info.city,
-//       students_info.state
-//     FROM
-//       login
-//     LEFT JOIN students_info ON login.user_id = students_info.user_id
-//     WHERE
-//       login.school_id = ? AND login.role = 'student';
-//   `;
-
-//   connection.query(selectQuery, [schoolId], (err, rows, fields) => {
-//     connectionProvider.mysqlConnectionStringProvider.closeMysqlConnection(
-//       connection
-//     );
-
-//     if (err) {
-//       console.error("Error executing database query:", err);
-//       return response.status(500).json({ error: err.message });
-//     }
-
-//     console.log("Students for School:", rows);
-//     response.json({ studentsData: rows });
-//   });
-// };
-
 exports.addTeacher = function (request, response) {
     const connection =
       connectionProvider.mysqlConnectionStringProvider.getMysqlConnection();
@@ -1121,9 +1193,7 @@ exports.addTeacher = function (request, response) {
           fatherName,
           motherName,
           emergencyContactName,
-          emergencyContactNumber,
-          classId,
-          subjectId,
+          emergencyContactNumber
         } = request.body;
 
         const schoolId = request.params.schoolId;
@@ -1140,11 +1210,12 @@ exports.addTeacher = function (request, response) {
         const role = "teacher";
 
         const insertLoginQuery = `
-          INSERT INTO login (school_id, sap_id, password, school_name, role)
-          VALUES (?, ?, ?, (SELECT school_name FROM schools_info WHERE school_id = ?), ?);
+          INSERT INTO login (school_id, sap_id, password, school_name, role, email)
+          VALUES (?, ?, ?, (SELECT school_name FROM schools_info WHERE school_id = ?), ?, ?);
         `;
 
-        const insertLoginPayload = [schoolId, sapId, password, schoolId, role];
+        const insertLoginPayload = [schoolId, sapId, password, schoolId, role, email];
+        console.log('LOGIN ROWS: ',insertLoginPayload)
 
         connection.query(insertLoginQuery, insertLoginPayload, (err, result) => {
           if (err) {
@@ -1176,7 +1247,7 @@ exports.addTeacher = function (request, response) {
               father_name,
               mother_name,
               emergency_contact_name,
-              emergency_contact_number,
+              emergency_contact_number
             )
             VALUES (?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?);
           `;
@@ -1199,7 +1270,7 @@ exports.addTeacher = function (request, response) {
             fatherName,
             motherName,
             emergencyContactName,
-            emergencyContactNumber,
+            emergencyContactNumber
           ];
 
           connection.query(
@@ -1246,7 +1317,176 @@ exports.addTeacher = function (request, response) {
         });
       }
     });
-  };
+};
+
+exports.fetchTeacherDetails = function (request, response) {
+    const userId = request.params.userId; // Updated parameter name to userId
+    const schoolId = request.params.schoolId; // Extract schoolId from URL
+  
+    const connection =
+      connectionProvider.mysqlConnectionStringProvider.getMysqlConnection();
+  
+    const selectQuery = `
+      SELECT
+        login.*,
+        teachers_info.*
+      FROM login
+      LEFT JOIN teachers_info ON login.user_id = teachers_info.user_id
+      WHERE login.user_id = ? AND login.school_id = ?;
+    `;
+  
+    connection.query(selectQuery, [userId, schoolId], (err, rows, fields) => {
+      connectionProvider.mysqlConnectionStringProvider.closeMysqlConnection(
+        connection
+      );
+  
+      if (err) {
+        console.error("Error executing database query:", err);
+        return response.status(500).json({ error: err.message });
+      }
+  
+      console.log("Teacher Details:", rows[0]);
+      response.json({ teacherDetails: rows[0] });
+    });
+};
+
+exports.updateTeacher = function (request, response) {
+  try {
+    const {
+      userId,
+      firstName,
+      middleName,
+      lastName,
+      gender,
+      birthday,
+      email,
+      contactNumber,
+      alternativeNumber,
+      aadharCardNumber,
+      panCard,
+      permanentAddress,
+      city,
+      state,
+      fatherName,
+      motherName,
+      emergencyContactName,
+      emergencyContactNumber,
+    } = request.body;
+
+    const connection =
+      connectionProvider.mysqlConnectionStringProvider.getMysqlConnection();
+
+    const updateQuery = `
+      UPDATE teachers_info
+      SET
+        first_name = ?,
+        middle_name = ?,
+        last_name = ?,
+        gender = ?,
+        birthday = ?,
+        email = ?,
+        contact_number = ?,
+        alternative_number = ?,
+        aadhar_card_number = ?,
+        pan_card = ?,
+        permanent_address = ?,
+        city = ?,
+        state = ?,
+        father_name = ?,
+        mother_name = ?,
+        emergency_contact_name = ?,
+        emergency_contact_number = ?
+      WHERE user_id = ?;
+    `;
+
+    const updatePayload = [
+      firstName,
+      middleName,
+      lastName,
+      gender,
+      birthday,
+      email,
+      contactNumber,
+      alternativeNumber,
+      aadharCardNumber,
+      panCard,
+      permanentAddress,
+      city,
+      state,
+      fatherName,
+      motherName,
+      emergencyContactName,
+      emergencyContactNumber,
+      userId,
+    ];
+
+    connection.query(updateQuery, updatePayload, (err, result) => {
+      connectionProvider.mysqlConnectionStringProvider.closeMysqlConnection(
+        connection
+      );
+
+      if (err) {
+        console.error("Error executing database query:", err);
+        return response.status(500).json({ error: err.message });
+      }
+
+      console.log("Teacher updated successfully");
+      response.json({ message: "Teacher updated successfully" });
+    });
+  } catch (error) {
+    console.error("Error updating teacher:", error);
+    response.status(500).json({ error: "Internal Server Error" });
+  }
+};
+
+exports.deleteTeacher = function (request, response) {
+  try {
+    const { userId } = request.body;
+
+    const connection =
+      connectionProvider.mysqlConnectionStringProvider.getMysqlConnection();
+
+    const deleteTeachersQuery = `
+      DELETE FROM teachers_info
+      WHERE user_id = ?;
+    `;
+
+    const deleteLoginQuery = `
+      DELETE FROM login
+      WHERE user_id = ?;
+    `;
+
+    // Delete from teachers_info table
+    connection.query(deleteTeachersQuery, [userId], (errTeachers, resultTeachers) => {
+      if (errTeachers) {
+        console.error("Error deleting from teachers_info table:", errTeachers);
+        return response.status(500).json({ error: errTeachers.message });
+      }
+
+      // Delete from login table
+      connection.query(deleteLoginQuery, [userId], (errLogin, resultLogin) => {
+        connectionProvider.mysqlConnectionStringProvider.closeMysqlConnection(
+          connection
+        );
+
+        if (errLogin) {
+          console.error("Error deleting from login table:", errLogin);
+          return response.status(500).json({ error: errLogin.message });
+        }
+
+        console.log("Teacher deleted successfully");
+        response.json({ message: "Teacher deleted successfully" });
+      });
+    });
+  } catch (error) {
+    console.error("Error deleting teacher:", error);
+    response.status(500).json({ error: "Internal Server Error" });
+  }
+};
+
+  
+
+// -------------- Student Related --------------
 
 exports.fetchStudentsForSchool = function (request, response) {
   const schoolId = request.params.schoolId;
@@ -1356,11 +1596,12 @@ exports.addStudent = function (request, response) {
       const role = "student";
 
       const insertLoginQuery = `
-        INSERT INTO login (school_id, sap_id, password, school_name, role)
-        VALUES (?, ?, ?, (SELECT school_name FROM schools_info WHERE school_id = ?), ?);
+        INSERT INTO login (school_id, sap_id, password, school_name, role, email)
+        VALUES (?, ?, ?, (SELECT school_name FROM schools_info WHERE school_id = ?), ?, ?);
       `;
 
-      const insertLoginPayload = [schoolId, sapId, password, schoolId, role];
+      const insertLoginPayload = [schoolId, sapId, password, schoolId, role, email];
+      console.log("STUDENT LOGIN DATA: ", insertLoginPayload)
 
       connection.query(insertLoginQuery, insertLoginPayload, (err, result) => {
         if (err) {
@@ -1485,38 +1726,6 @@ exports.addStudent = function (request, response) {
   });
 };
 
-
-exports.fetchTeacherDetails = function (request, response) {
-  const userId = request.params.userId; // Updated parameter name to userId
-  const schoolId = request.params.schoolId; // Extract schoolId from URL
-
-  const connection =
-    connectionProvider.mysqlConnectionStringProvider.getMysqlConnection();
-
-  const selectQuery = `
-    SELECT
-      login.*,
-      teachers_info.*
-    FROM login
-    LEFT JOIN teachers_info ON login.user_id = teachers_info.user_id
-    WHERE login.user_id = ? AND login.school_id = ?;
-  `;
-
-  connection.query(selectQuery, [userId, schoolId], (err, rows, fields) => {
-    connectionProvider.mysqlConnectionStringProvider.closeMysqlConnection(
-      connection
-    );
-
-    if (err) {
-      console.error("Error executing database query:", err);
-      return response.status(500).json({ error: err.message });
-    }
-
-    console.log("Teacher Details:", rows[0]);
-    response.json({ teacherDetails: rows[0] });
-  });
-};
-
 exports.fetchStudentDetails = function (request, response) {
   const userId = request.params.userId;
   const schoolId = request.params.schoolId;
@@ -1548,6 +1757,176 @@ exports.fetchStudentDetails = function (request, response) {
   });
 };
 
+exports.updateStudent = function (request, response) {
+  try {
+    const {
+      // student details from the form
+      firstName,
+      middleName,
+      lastName,
+      gender,
+      birthday,
+      email,
+      contactNumber,
+      alternativeNumber,
+      aadharCardNumber,
+      // address details
+      permanentAddress,
+      city,
+      state,
+      // family details
+      fatherName,
+      fatherContactNumber,
+      fatherEmail,
+      motherName,
+      motherContactNumber,
+      motherEmail,
+      guardianName,
+      guardianNumber,
+      guardianEmail,
+      // account details
+      accountHolderName,
+      bankName,
+      accountNumber,
+      ifscCode,
+      accountType,
+      // Mentor Id
+      mentorId,
+      userId, // User ID of the student to update
+    } = request.body;
+
+    const connection =
+      connectionProvider.mysqlConnectionStringProvider.getMysqlConnection();
+
+    const updateStudentQuery = `
+      UPDATE students_info
+      SET
+        first_name = ?,
+        middle_name = ?,
+        last_name = ?,
+        gender = ?,
+        birthday = ?,
+        email = ?,
+        contact_number = ?,
+        alternative_number = ?,
+        aadhar_card_number = ?,
+        permanent_address = ?,
+        city = ?,
+        state = ?,
+        father_name = ?,
+        father_contact_number = ?,
+        father_email = ?,
+        mother_name = ?,
+        mother_contact_number = ?,
+        mother_email = ?,
+        guardian_name = ?,
+        guardian_number = ?,
+        guardian_email = ?,
+        account_holder_name = ?,
+        bank_name = ?,
+        account_number = ?,
+        ifsc_code = ?,
+        account_type = ?,
+        mentor_id = ?
+      WHERE user_id = ?;
+    `;
+
+    const updateStudentPayload = [
+      firstName,
+      middleName,
+      lastName,
+      gender,
+      birthday,
+      email,
+      contactNumber,
+      alternativeNumber,
+      aadharCardNumber,
+      permanentAddress,
+      city,
+      state,
+      fatherName,
+      fatherContactNumber,
+      fatherEmail,
+      motherName,
+      motherContactNumber,
+      motherEmail,
+      guardianName,
+      guardianNumber,
+      guardianEmail,
+      accountHolderName,
+      bankName,
+      accountNumber,
+      ifscCode,
+      accountType,
+      mentorId,
+      userId,
+    ];
+
+    connection.query(updateStudentQuery, updateStudentPayload, (err, result) => {
+      connectionProvider.mysqlConnectionStringProvider.closeMysqlConnection(
+        connection
+      );
+
+      if (err) {
+        console.error("Error executing update student query:", err);
+        return response.status(500).json({ error: err.message });
+      }
+
+      console.log("Student updated successfully");
+      response.json({ message: "Student updated successfully" });
+    });
+  } catch (error) {
+    console.error("Error updating student:", error);
+    response.status(500).json({ error: "Internal Server Error" });
+  }
+};
+
+exports.deleteStudent = function (request, response) {
+  try {
+    const { userId } = request.body;
+
+    const connection =
+      connectionProvider.mysqlConnectionStringProvider.getMysqlConnection();
+
+    const deleteStudentsQuery = `
+      DELETE FROM students_info
+      WHERE user_id = ?;
+    `;
+
+    const deleteLoginQuery = `
+      DELETE FROM login
+      WHERE user_id = ?;
+    `;
+
+    // Delete from students_info table
+    connection.query(deleteStudentsQuery, [userId], (errStudents, resultStudents) => {
+      if (errStudents) {
+        console.error("Error deleting from students_info table:", errStudents);
+        return response.status(500).json({ error: errStudents.message });
+      }
+
+      // Delete from login table
+      connection.query(deleteLoginQuery, [userId], (errLogin, resultLogin) => {
+        connectionProvider.mysqlConnectionStringProvider.closeMysqlConnection(
+          connection
+        );
+
+        if (errLogin) {
+          console.error("Error deleting from login table:", errLogin);
+          return response.status(500).json({ error: errLogin.message });
+        }
+
+        console.log("Student deleted successfully");
+        response.json({ message: "Student deleted successfully" });
+      });
+    });
+  } catch (error) {
+    console.error("Error deleting student:", error);
+    response.status(500).json({ error: "Internal Server Error" });
+  }
+};
+
+
 function generateRandomSapId() {
   const length = 10;
   const characters = "0123456789";
@@ -1560,6 +1939,9 @@ function generateRandomSapId() {
 
   return result;
 }
+
+
+// --------------- Mentor Related --------------------
 
 exports.fetchAllMentorsData = function (request, response) {
   try {
@@ -1683,10 +2065,175 @@ exports.fetchMentors = function (request, response) {
   }
 };
 
+exports.updateMentor = function (request, response) {
+  try {
+    const {
+      mentorId,
+      mentorFirstName,
+      mentorMiddleName,
+      mentorLastName,
+      email,
+      aadharCard,
+      birthdate,
+      contactNumber,
+      alternativeContactNumber,
+      permanentAddress,
+      city,
+      state,
+    } = request.body;
+
+    const connection =
+      connectionProvider.mysqlConnectionStringProvider.getMysqlConnection();
+
+    const updateQuery = `
+      UPDATE mentors_info
+      SET
+        mentor_first_name = ?,
+        mentor_middle_name = ?,
+        mentor_last_name = ?,
+        email = ?,
+        aadhar_card = ?,
+        birthdate = ?,
+        contact_number = ?,
+        alternative_contact_number = ?,
+        permanent_address = ?,
+        city = ?,
+        state = ?
+      WHERE mentor_id = ?;
+    `;
+
+    const updatePayload = [
+      mentorFirstName,
+      mentorMiddleName,
+      mentorLastName,
+      email,
+      aadharCard,
+      birthdate,
+      contactNumber,
+      alternativeContactNumber,
+      permanentAddress,
+      city,
+      state,
+      mentorId,
+    ];
+
+    connection.query(updateQuery, updatePayload, (err, result) => {
+      connectionProvider.mysqlConnectionStringProvider.closeMysqlConnection(
+        connection
+      );
+
+      if (err) {
+        console.error("Error executing database query:", err);
+        return response.status(500).json({ error: err.message });
+      }
+
+      console.log("Mentor updated successfully");
+      response.json({ message: "Mentor updated successfully" });
+    });
+  } catch (error) {
+    console.error("Error updating mentor:", error);
+    response.status(500).json({ error: "Internal Server Error" });
+  }
+};
+
+
+exports.deleteMentor = function (request, response) {
+  try {
+    const mentorId = request.body.mentorId;
+
+    const connection =
+      connectionProvider.mysqlConnectionStringProvider.getMysqlConnection();
+
+    const deleteMentorQuery = `
+      DELETE FROM mentors_info
+      WHERE mentor_id = ?;
+    `;
+
+    const deleteStudentsQuery = `
+      DELETE FROM students_info
+      WHERE mentor_id = ?;
+    `;
+
+    // Start a transaction
+    connection.beginTransaction(function (err) {
+      if (err) {
+        console.error("Error starting transaction:", err);
+        return response.status(500).json({ error: err.message });
+      }
+
+      // Delete from mentors_info table
+      connection.query(deleteMentorQuery, [mentorId], function (errMentor, resultMentor) {
+        if (errMentor) {
+          return connection.rollback(function () {
+            console.error("Error deleting from mentors_info table:", errMentor);
+            response.status(500).json({ error: errMentor.message });
+          });
+        }
+
+        // Delete from students_info table
+        connection.query(deleteStudentsQuery, [mentorId], function (errStudents, resultStudents) {
+          if (errStudents) {
+            return connection.rollback(function () {
+              console.error("Error deleting students associated with mentor:", errStudents);
+              response.status(500).json({ error: errStudents.message });
+            });
+          }
+
+          // Commit the transaction if everything is successful
+          connection.commit(function (err) {
+            if (err) {
+              return connection.rollback(function () {
+                console.error("Error committing transaction:", err);
+                response.status(500).json({ error: err.message });
+              });
+            }
+
+            console.log("Mentor and associated students deleted successfully");
+            response.json({ message: "Mentor and associated students deleted successfully" });
+          });
+        });
+      });
+    });
+  } catch (error) {
+    console.error("Error deleting mentor:", error);
+    response.status(500).json({ error: "Internal Server Error" });
+  }
+};
+
+
+exports.fetchMentorDetails = function (request, response) {
+  const mentorId = request.params.mentorId; // Updated parameter name to mentorId
+
+  const connection =
+    connectionProvider.mysqlConnectionStringProvider.getMysqlConnection();
+
+  const selectQuery = `
+    SELECT *
+    FROM mentors_info
+    WHERE mentor_id = ?;
+  `;
+
+  connection.query(selectQuery, [mentorId], (err, rows, fields) => {
+    connectionProvider.mysqlConnectionStringProvider.closeMysqlConnection(
+      connection
+    );
+
+    if (err) {
+      console.error("Error executing database query:", err);
+      return response.status(500).json({ error: err.message });
+    }
+
+    console.log("Mentor Details:", rows[0]);
+    response.json({ mentorDetails: rows[0] });
+  });
+};
+
+
+
+
 
 // ------------------------Working Code ---------------------------------------
 
 // ------------------------Testing Code ---------------------------------------
-
 
 
