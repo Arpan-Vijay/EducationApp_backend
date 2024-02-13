@@ -110,11 +110,17 @@ exports.uploadProfileImage = async function (req, res) {
     const fileContent = await fs.readFile(path);
     console.log("PATH: ", path);
 
-    const userId = req.params.userId;
+    // Extract userId from the request body (assuming it was added during the teacher creation)
+    const userId = req.body.userId;
+
+    if (!userId) {
+      console.error("Error: userId is missing in the request body.");
+      return res.status(400).json({ error: "Bad Request: userId is missing" });
+    }
 
     const params = {
       Bucket: "embed-app-bucket",
-      Key: `Image-EdApp:${userId}`, //S3 key
+      Key: `Image-EdApp:${userId}`, // S3 key
       Body: fileContent,
     };
 
@@ -136,11 +142,12 @@ exports.uploadProfileImage = async function (req, res) {
 exports.updateProfileImage = async function (req, res) {
   try {
     const userId = req.params.userId;
+    const role = 'teacher'
 
-    // Construct S3 key based on userId
+    // Construct S3 key based on userId and role
     const updateParams = {
       Bucket: "embed-app-bucket",
-      Key: `Image-EdApp:${userId}`,
+      Key: `Image-EdApp:${role}-${userId}`,
     };
 
     // Assuming you have the updated image file in the request
@@ -161,7 +168,7 @@ exports.updateProfileImage = async function (req, res) {
     await fs.unlink(updatedFilePath);
 
     console.log("Object updated successfully");
-    res.status(200).send({ message: "updated successfully" });
+    res.status(200).send({ message: "Updated successfully" });
   } catch (error) {
     console.error("Error updating object:", error);
     res.status(500).send({ error: "Internal Server Error" });
@@ -171,11 +178,12 @@ exports.updateProfileImage = async function (req, res) {
 exports.retrieveProfileImage = async function (req, res) {
   try {
     const userId = req.params.userId;
-
+    const role = 'teacher'
     // Construct S3 key based on userId
     const retrieveParams = {
       Bucket: "embed-app-bucket",
-      Key: `Image-EdApp:${userId}`,
+      Key: `Image-EdApp:${role}-${userId}`,
+      ResponseContentType: "image/jpeg",
     };
 
     const retrieveCommand = new GetObjectCommand(retrieveParams);
@@ -185,10 +193,11 @@ exports.retrieveProfileImage = async function (req, res) {
       expiresIn: 3600,
     });
 
-    console.log("Image retrieved successfully.", signedUrl);
+    const urlObject = new URL(signedUrl);
 
-    // Redirect the client to the signed URL
-    res.redirect(302, signedUrl);
+    console.log("Image retrieved successfully.", urlObject);
+    res.status(200).send({ dataUrl: urlObject });
+
   } catch (error) {
     console.error("Error retrieving image:", error);
     res.status(500).send({ error: "Internal Server Error" });
@@ -198,11 +207,12 @@ exports.retrieveProfileImage = async function (req, res) {
 exports.deleteProfileImage = async function (req, res) {
   try {
     const userId = req.params.userId;
+    const role = 'teacher'
 
     // Construct S3 key based on userId
     const deleteParams = {
       Bucket: "embed-app-bucket",
-      Key: `Image-EdApp:${userId}`,
+      Key: `Image-EdApp:${role}-${userId}`, // Assuming the role is 'teacher'
     };
 
     const deleteCommand = new DeleteObjectCommand(deleteParams);
@@ -220,6 +230,33 @@ exports.deleteProfileImage = async function (req, res) {
     res.status(500).send({ error: "Internal Server Error" });
   }
 };
+
+
+// exports.deleteProfileImage = async function (req, res) {
+//   try {
+//     const userId = req.params.userId;
+
+//     // Construct S3 key based on userId
+//     const deleteParams = {
+//       Bucket: "embed-app-bucket",
+//       Key: `Image-EdApp:${userId}`,
+//     };
+
+//     const deleteCommand = new DeleteObjectCommand(deleteParams);
+
+//     // Send the delete command to S3
+//     const deleteResponse = await s3Client.send(deleteCommand);
+
+//     // Log the response from S3 (optional)
+//     console.log("Delete Object Response:", deleteResponse);
+
+//     console.log("Object deleted successfully");
+//     res.status(200).send({ message: "deleted successfully" });
+//   } catch (error) {
+//     console.error("Error deleting object:", error);
+//     res.status(500).send({ error: "Internal Server Error" });
+//   }
+// };
 
 /////////////////////////////////////////////////////////
 //------Login and Reset Password Functions ------
@@ -1171,6 +1208,9 @@ GROUP BY
 };
 
 exports.addTeacher = function (request, response) {
+  console.log('REQUEST DAAAATA',request.body.TeacherData)
+  const teacherData = JSON.parse(request.body.TeacherData)
+
   const connection =
     connectionProvider.mysqlConnectionStringProvider.getMysqlConnection();
 
@@ -1203,7 +1243,7 @@ exports.addTeacher = function (request, response) {
         motherName,
         emergencyContactName,
         emergencyContactNumber,
-      } = request.body;
+      } = teacherData;
 
       const schoolId = request.params.schoolId;
 
@@ -1267,7 +1307,7 @@ exports.addTeacher = function (request, response) {
             )
             VALUES (?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?);
           `;
-
+        console.log("userid", result.insertId);
         const insertTeacherPayload = [
           result.insertId, // Use the ID generated in the login query
           firstName,
@@ -1289,10 +1329,12 @@ exports.addTeacher = function (request, response) {
           emergencyContactNumber,
         ];
 
+        const userId = result.insertId;
+
         connection.query(
           insertTeacherQuery,
           insertTeacherPayload,
-          (err, result) => {
+          async (err, result) => {
             if (err) {
               console.error("Error executing teacher query:", err);
               return connection.rollback(function () {
@@ -1303,25 +1345,59 @@ exports.addTeacher = function (request, response) {
               });
             }
 
-            connection.commit(function (err) {
-              if (err) {
-                console.error("Error committing transaction:", err);
-                return connection.rollback(function () {
-                  connectionProvider.mysqlConnectionStringProvider.closeMysqlConnection(connection);
-                  response.status(500).json({ error: err.message });
-                });
-              }
-            
-              console.log("Transaction completed successfully");
-            
-              // Include the userId in the response
-              const userId = result.insertId;
-              
-              // Close the connection only once after including userId in the response
-              connectionProvider.mysqlConnectionStringProvider.closeMysqlConnection(connection);
-            
-              response.json({ message: "Teacher added successfully",  userId: result.insertId });
-            });
+            // Integrate image upload logic here
+            const path = request.file.path;
+            const fileContent = await fs.readFile(path);
+
+            const params = {
+              Bucket: "embed-app-bucket",
+              Key: `Image-EdApp:${role}-${userId}`, // S3 key
+              Body: fileContent,
+            };
+
+            const command = new PutObjectCommand(params);
+
+            try {
+              const uploadResponse = await s3Client.send(command);
+              console.log(
+                "Image uploaded successfully. Location:",
+                uploadResponse
+              );
+
+              // Delete local file after successful upload
+              await fs.unlink(path);
+
+              connection.commit(function (err) {
+                if (err) {
+                  console.error("Error committing transaction:", err);
+                  return connection.rollback(function () {
+                    connectionProvider.mysqlConnectionStringProvider.closeMysqlConnection(
+                      connection
+                    );
+                    response.status(500).json({ error: err.message });
+                  });
+                }
+
+                response.json({status:'successfully added'})
+
+                console.log("Transaction completed successfully");
+
+                console.log("USERID", userId);
+
+                // Close the connection only once after including userId in the response
+                connectionProvider.mysqlConnectionStringProvider.closeMysqlConnection(
+                  connection
+                );
+              });
+            } catch (uploadError) {
+              console.error("Error uploading image:", uploadError);
+              return connection.rollback(function () {
+                connectionProvider.mysqlConnectionStringProvider.closeMysqlConnection(
+                  connection
+                );
+                response.status(500).json({ error: "Internal Server Error" });
+              });
+            }
           }
         );
       });

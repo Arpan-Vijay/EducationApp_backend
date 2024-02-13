@@ -290,41 +290,23 @@ router.get("/fetch-teacher-details/:schoolId/:userId", async (req, res) => {
   }
 });
 
-// router.post("/add-teacher/:schoolId", async (req, res) => {
-//   console.log("Received request to /add-teacher/:schoolId");
-//   try {
-//     // Extract the schoolId from the URL parameters
-//     const { schoolId } = req.params;
-
-//     // Attach the schoolId to the request body
-//     req.body.schoolId = schoolId;
-
-//     // Call the addTeacher function in userDao.js
-//     await userDao.addTeacher(req, res);
-//   } catch (error) {
-//     console.error("Error adding teacher:", error);
-//     res.status(500).json({ error: "Internal Server Error" });
-//   }
-// });
-
-
-router.post("/add-teacher/:schoolId", async (req, res) => {
+router.post("/add-teacher/:schoolId", existingUpload.single("image"),async (req, res) => {
   console.log("Received request to /add-teacher/:schoolId");
   try {
+    // Extract the schoolId from the URL parameters
     const { schoolId } = req.params;
+
+    // Attach the schoolId to the request body
     req.body.schoolId = schoolId;
 
     // Call the addTeacher function in userDao.js
-    const { userId } = await userDao.addTeacher(req, res);
-
-    // Pass the userId to the next middleware (in this case, uploadProfileImage)
-    req.params.userId = userId;
-    next();
+    await userDao.addTeacher(req, res);
   } catch (error) {
     console.error("Error adding teacher:", error);
     res.status(500).json({ error: "Internal Server Error" });
   }
 });
+
 
 // New route for updating teacher information
 router.put("/update-teacher/", async (req, res) => {
