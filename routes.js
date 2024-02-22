@@ -372,7 +372,7 @@ router.get("/fetch-student-details/:schoolId/:userId", async (req, res) => {
 });
 
 // Route to add a student to a specific school
-router.post("/add-student/:schoolId", async (req, res) => {
+router.post("/add-student/:schoolId", existingUpload.single("image"),async (req, res) => {
   console.log("Received request to /add-student/:schoolId");
   try {
     // Extract the schoolId from the URL parameters
@@ -490,14 +490,14 @@ router.delete("/delete-mentor", async (req, res) => {
   }
 });
 
-router.get("/fetch-mentor-details/:mentorId", async (req, res) => {
-  console.log("Received request to /fetch-mentor-details/:mentorId");
+router.get("/fetch-mentor-details/:userId", async (req, res) => {
+  console.log("Received request to /fetch-mentor-details/:userId");
   try {
     // Extract the mentorId from the URL parameters
-    const { mentorId } = req.params;
+    const { userId } = req.params;
 
-    // Attach the mentorId to the request body
-    req.body.mentorId = mentorId;
+    // Attach the userId to the request body
+    req.body.userId = userId;
 
     // Call the fetchMentorDetails function in userDao.js
     await userDao.fetchMentorDetails(req, res);

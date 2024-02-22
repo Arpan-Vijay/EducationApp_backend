@@ -83,6 +83,10 @@ exports.retrieveOrgIcon = async function (req, res) {
 //------S3 Bucket ------
 /////////////////////////////////////////////////////////
 
+// function getUserRole(userType) {
+//   return userType === 'teacher' ? 'teacher' : 'student';
+// }
+
 const storage = multer.diskStorage({
   destination: async function (req, file, cb) {
     try {
@@ -111,16 +115,16 @@ exports.uploadProfileImage = async function (req, res) {
     console.log("PATH: ", path);
 
     // Extract userId from the request body (assuming it was added during the teacher creation)
-    const userId = req.body.userId;
+    const id = req.body.userId;
 
-    if (!userId) {
+    if (!id) {
       console.error("Error: userId is missing in the request body.");
       return res.status(400).json({ error: "Bad Request: userId is missing" });
     }
 
     const params = {
       Bucket: "embed-app-bucket",
-      Key: `Image-EdApp:${userId}`, // S3 key
+      Key: `Image-EdApp:${id}`, // S3 key
       Body: fileContent,
     };
 
@@ -141,13 +145,18 @@ exports.uploadProfileImage = async function (req, res) {
 
 exports.updateProfileImage = async function (req, res) {
   try {
-    const userId = req.params.userId;
-    const role = 'teacher'
+    const id = req.params.userId;
+    // const role = getUserRole(req, ''); // An empty string ensures it doesn't set the role
+
+    const path = req.file.path;
+    const fileContent = await fs.readFile(path);
+    console.log("PATH: ", path);
 
     // Construct S3 key based on userId and role
     const updateParams = {
       Bucket: "embed-app-bucket",
-      Key: `Image-EdApp:${role}-${userId}`,
+      Key: `Image-EdApp: ${id}`,
+      Body: fileContent,
     };
 
     // Assuming you have the updated image file in the request
@@ -177,12 +186,13 @@ exports.updateProfileImage = async function (req, res) {
 
 exports.retrieveProfileImage = async function (req, res) {
   try {
-    const userId = req.params.userId;
-    const role = 'teacher'
+    const id = req.params.userId;
+    // const role = getUserRole(req, ''); // An empty string ensures it doesn't set the role
+
     // Construct S3 key based on userId
     const retrieveParams = {
       Bucket: "embed-app-bucket",
-      Key: `Image-EdApp:${role}-${userId}`,
+      Key: `Image-EdApp: ${id}`,
       ResponseContentType: "image/jpeg",
     };
 
@@ -197,7 +207,6 @@ exports.retrieveProfileImage = async function (req, res) {
 
     console.log("Image retrieved successfully.", urlObject);
     res.status(200).send({ dataUrl: urlObject });
-
   } catch (error) {
     console.error("Error retrieving image:", error);
     res.status(500).send({ error: "Internal Server Error" });
@@ -206,13 +215,13 @@ exports.retrieveProfileImage = async function (req, res) {
 
 exports.deleteProfileImage = async function (req, res) {
   try {
-    const userId = req.params.userId;
-    const role = 'teacher'
+    const id = req.params.userId;
+    // const role = getUserRole(req, ''); // An empty string ensures it doesn't set the role
 
     // Construct S3 key based on userId
     const deleteParams = {
       Bucket: "embed-app-bucket",
-      Key: `Image-EdApp:${role}-${userId}`, // Assuming the role is 'teacher'
+      Key: `Image-EdApp: ${id}`, // Assuming the role is 'teacher'
     };
 
     const deleteCommand = new DeleteObjectCommand(deleteParams);
@@ -230,33 +239,6 @@ exports.deleteProfileImage = async function (req, res) {
     res.status(500).send({ error: "Internal Server Error" });
   }
 };
-
-
-// exports.deleteProfileImage = async function (req, res) {
-//   try {
-//     const userId = req.params.userId;
-
-//     // Construct S3 key based on userId
-//     const deleteParams = {
-//       Bucket: "embed-app-bucket",
-//       Key: `Image-EdApp:${userId}`,
-//     };
-
-//     const deleteCommand = new DeleteObjectCommand(deleteParams);
-
-//     // Send the delete command to S3
-//     const deleteResponse = await s3Client.send(deleteCommand);
-
-//     // Log the response from S3 (optional)
-//     console.log("Delete Object Response:", deleteResponse);
-
-//     console.log("Object deleted successfully");
-//     res.status(200).send({ message: "deleted successfully" });
-//   } catch (error) {
-//     console.error("Error deleting object:", error);
-//     res.status(500).send({ error: "Internal Server Error" });
-//   }
-// };
 
 /////////////////////////////////////////////////////////
 //------Login and Reset Password Functions ------
@@ -896,6 +878,7 @@ exports.fetchSchoolData = function (request, response) {
         schools_info.school_name,
         schools_info.principal_name,
         schools_info.contact_number,
+        schools_info.funds_deployed,
         COUNT(login.user_id) AS total_users,
         SUM(CASE WHEN login.role = 'teacher' THEN 1 ELSE 0 END) AS total_teachers,
         SUM(CASE WHEN login.role = 'student' THEN 1 ELSE 0 END) AS total_students
@@ -962,6 +945,7 @@ exports.addSchool = function (request, response) {
       zipCode,
       contactNumber,
       alternativeNumber,
+      fundsDeployed,
     } = request.body;
 
     const connection =
@@ -977,9 +961,10 @@ exports.addSchool = function (request, response) {
         state,
         zip_code,
         contact_number,
-        alternative_number
+        alternative_number,
+        funds_deployed
       )
-      VALUES (?, ?, ?, ?, ?, ?, ?, ?, ?);
+      VALUES (?, ?, ?, ?, ?, ?, ?, ?, ?, ?);
     `;
 
     const insertQueryPayload = [
@@ -992,6 +977,7 @@ exports.addSchool = function (request, response) {
       zipCode,
       contactNumber,
       alternativeNumber,
+      fundsDeployed,
     ];
 
     connection.query(insertQuery, insertQueryPayload, (err, result) => {
@@ -1208,8 +1194,8 @@ GROUP BY
 };
 
 exports.addTeacher = function (request, response) {
-  console.log('REQUEST DAAAATA',request.body.TeacherData)
-  const teacherData = JSON.parse(request.body.TeacherData)
+  console.log("REQUEST DAAAATA", request.body.TeacherData);
+  const teacherData = JSON.parse(request.body.TeacherData);
 
   const connection =
     connectionProvider.mysqlConnectionStringProvider.getMysqlConnection();
@@ -1256,7 +1242,9 @@ exports.addTeacher = function (request, response) {
       console.log("Generated SAP ID:", sapId);
       console.log("Generated Password:", password);
 
+      // const role = getUserRole(request, 'teacher');
       const role = "teacher";
+      console.log(role);
 
       const insertLoginQuery = `
           INSERT INTO login (school_id, sap_id, password, school_name, role, email)
@@ -1272,6 +1260,7 @@ exports.addTeacher = function (request, response) {
         email,
       ];
       console.log("LOGIN ROWS: ", insertLoginPayload);
+      console.log("ROLEEE: ", role);
 
       connection.query(insertLoginQuery, insertLoginPayload, (err, result) => {
         if (err) {
@@ -1329,7 +1318,7 @@ exports.addTeacher = function (request, response) {
           emergencyContactNumber,
         ];
 
-        const userId = result.insertId;
+        const id = result.insertId;
 
         connection.query(
           insertTeacherQuery,
@@ -1351,7 +1340,7 @@ exports.addTeacher = function (request, response) {
 
             const params = {
               Bucket: "embed-app-bucket",
-              Key: `Image-EdApp:${role}-${userId}`, // S3 key
+              Key: `Image-EdApp: ${id}`, // S3 key
               Body: fileContent,
             };
 
@@ -1378,11 +1367,12 @@ exports.addTeacher = function (request, response) {
                   });
                 }
 
-                response.json({status:'successfully added'})
+                response.json({ status: "successfully added" });
 
                 console.log("Transaction completed successfully");
 
-                console.log("USERID", userId);
+                // console.log("USERID", userId);
+                console.log("ROLEE_3", role);
 
                 // Close the connection only once after including userId in the response
                 connectionProvider.mysqlConnectionStringProvider.closeMysqlConnection(
@@ -1618,7 +1608,7 @@ exports.fetchStudentsForSchool = function (request, response) {
     FROM
       login
     LEFT JOIN students_info ON login.user_id = students_info.user_id
-    LEFT JOIN mentors_info ON mentors_info.mentor_id = students_info.mentor_id
+    LEFT JOIN mentors_info ON mentors_info.user_id = students_info.mentor_id
     WHERE
       login.school_id = ? AND login.role = 'student';
   `;
@@ -1639,6 +1629,9 @@ exports.fetchStudentsForSchool = function (request, response) {
 };
 
 exports.addStudent = function (request, response) {
+  console.log("REQUEST DAAAATA", request.body.StudentData);
+  const studentData = JSON.parse(request.body.StudentData);
+  
   const connection =
     connectionProvider.mysqlConnectionStringProvider.getMysqlConnection();
 
@@ -1681,9 +1674,9 @@ exports.addStudent = function (request, response) {
         ifscCode,
         accountType,
         // Mentor Id
-        mentorId,
-      } = request.body;
-      console.log("Add Student Data : ", request.body);
+        userId,
+      } = studentData;
+      console.log("Add Student Data : ", studentData);
 
       const schoolId = request.params.schoolId;
 
@@ -1757,7 +1750,7 @@ exports.addStudent = function (request, response) {
             )
             VALUES (?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?);
           `;
-
+        console.log("userid", result.insertId);
         const insertStudentPayload = [
           result.insertId, // Use the ID generated in the login query
           firstName,
@@ -1786,15 +1779,17 @@ exports.addStudent = function (request, response) {
           accountNumber,
           ifscCode,
           accountType,
-          mentorId,
+          userId,
         ];
+
+        const id = result.insertId;
 
         connection.query(
           insertStudentQuery,
           insertStudentPayload,
-          (err, result) => {
+          async (err, result) => {
             if (err) {
-              console.error("Error executing student query:", err);
+              console.error("Error executing Student query:", err);
               return connection.rollback(function () {
                 connectionProvider.mysqlConnectionStringProvider.closeMysqlConnection(
                   connection
@@ -1803,23 +1798,60 @@ exports.addStudent = function (request, response) {
               });
             }
 
-            connection.commit(function (err) {
-              if (err) {
-                console.error("Error committing transaction:", err);
-                return connection.rollback(function () {
-                  connectionProvider.mysqlConnectionStringProvider.closeMysqlConnection(
-                    connection
-                  );
-                  response.status(500).json({ error: err.message });
-                });
-              }
+            // Integrate image upload logic here
+            const path = request.file.path;
+            const fileContent = await fs.readFile(path);
 
-              console.log("Transaction completed successfully");
-              connectionProvider.mysqlConnectionStringProvider.closeMysqlConnection(
-                connection
+            const params = {
+              Bucket: "embed-app-bucket",
+              Key: `Image-EdApp: ${id}`, // S3 key
+              Body: fileContent,
+            };
+
+            const command = new PutObjectCommand(params);
+
+            try {
+              const uploadResponse = await s3Client.send(command);
+              console.log(
+                "Image uploaded successfully. Location:",
+                uploadResponse
               );
-              response.json({ message: "Student added successfully" });
-            });
+
+              // Delete local file after successful upload
+              await fs.unlink(path);
+
+              connection.commit(function (err) {
+                if (err) {
+                  console.error("Error committing transaction:", err);
+                  return connection.rollback(function () {
+                    connectionProvider.mysqlConnectionStringProvider.closeMysqlConnection(
+                      connection
+                    );
+                    response.status(500).json({ error: err.message });
+                  });
+                }
+
+                response.json({ status: "successfully added" });
+
+                console.log("Transaction completed successfully");
+
+                console.log("USERID", userId);
+                console.log("ROLEE_3", role);
+
+                // Close the connection only once after including userId in the response
+                connectionProvider.mysqlConnectionStringProvider.closeMysqlConnection(
+                  connection
+                );
+              });
+            } catch (uploadError) {
+              console.error("Error uploading image:", uploadError);
+              return connection.rollback(function () {
+                connectionProvider.mysqlConnectionStringProvider.closeMysqlConnection(
+                  connection
+                );
+                response.status(500).json({ error: "Internal Server Error" });
+              });
+            }
           }
         );
         // });
@@ -2111,6 +2143,9 @@ exports.addMentor = function (request, response) {
       state,
     } = request.body;
 
+    const password = email; // Assuming password should be the same as the email
+    const role = 'mentor';
+
     const connection =
       connectionProvider.mysqlConnectionStringProvider.getMysqlConnection();
 
@@ -2126,9 +2161,11 @@ exports.addMentor = function (request, response) {
         alternative_contact_number,
         permanent_address,
         city,
-        state
+        state,
+        role,
+        password
       )
-      VALUES (?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?);
+      VALUES (?, ?,?,?, ?, ?, ?, ?, ?, ?, ?, ?, ?);
     `;
 
     const insertQueryPayload = [
@@ -2143,6 +2180,8 @@ exports.addMentor = function (request, response) {
       permanentAddress,
       city,
       state,
+      role,
+      password,
     ];
 
     connection.query(insertQuery, insertQueryPayload, (err, result) => {
@@ -2171,7 +2210,7 @@ exports.fetchMentors = function (request, response) {
       connectionProvider.mysqlConnectionStringProvider.getMysqlConnection();
 
     const selectQuery =
-      'SELECT mentor_id, CONCAT(mentor_first_name, " ", mentor_last_name) AS mentor_name FROM mentors_info';
+      'SELECT user_id, CONCAT(mentor_first_name, " ", mentor_last_name) AS mentor_name FROM mentors_info';
 
     connection.query(selectQuery, (err, rows, fields) => {
       connectionProvider.mysqlConnectionStringProvider.closeMysqlConnection(
@@ -2194,7 +2233,7 @@ exports.fetchMentors = function (request, response) {
 exports.updateMentor = function (request, response) {
   try {
     const {
-      mentorId,
+      userId,
       mentorFirstName,
       mentorMiddleName,
       mentorLastName,
@@ -2225,7 +2264,7 @@ exports.updateMentor = function (request, response) {
         permanent_address = ?,
         city = ?,
         state = ?
-      WHERE mentor_id = ?;
+      WHERE user_id = ?;
     `;
 
     const updatePayload = [
@@ -2240,7 +2279,7 @@ exports.updateMentor = function (request, response) {
       permanentAddress,
       city,
       state,
-      mentorId,
+      userId,
     ];
 
     connection.query(updateQuery, updatePayload, (err, result) => {
@@ -2262,90 +2301,91 @@ exports.updateMentor = function (request, response) {
   }
 };
 
-exports.deleteMentor = function (request, response) {
-  try {
-    const mentorId = request.body.mentorId;
+// exports.deleteMentor = function (request, response) {
+//   try {
+//     const userId = request.body.userId;
+//     // const mentorId = request.body.mentorId;
 
-    const connection =
-      connectionProvider.mysqlConnectionStringProvider.getMysqlConnection();
+//     const connection =
+//       connectionProvider.mysqlConnectionStringProvider.getMysqlConnection();
 
-    const deleteMentorQuery = `
-      DELETE FROM mentors_info
-      WHERE mentor_id = ?;
-    `;
+//     const deleteMentorQuery = `
+//       DELETE FROM mentors_info
+//       WHERE user_id = ?;
+//     `;
 
-    const deleteStudentsQuery = `
-      DELETE FROM students_info
-      WHERE mentor_id = ?;
-    `;
+//     const deleteStudentsQuery = `
+//       DELETE FROM students_info
+//       WHERE mentor_id = ?;
+//     `;
 
-    // Start a transaction
-    connection.beginTransaction(function (err) {
-      if (err) {
-        console.error("Error starting transaction:", err);
-        return response.status(500).json({ error: err.message });
-      }
+//     // Start a transaction
+//     connection.beginTransaction(function (err) {
+//       if (err) {
+//         console.error("Error starting transaction:", err);
+//         return response.status(500).json({ error: err.message });
+//       }
 
-      // Delete from mentors_info table
-      connection.query(
-        deleteMentorQuery,
-        [mentorId],
-        function (errMentor, resultMentor) {
-          if (errMentor) {
-            return connection.rollback(function () {
-              console.error(
-                "Error deleting from mentors_info table:",
-                errMentor
-              );
-              response.status(500).json({ error: errMentor.message });
-            });
-          }
+//       // Delete from mentors_info table
+//       connection.query(
+//         deleteMentorQuery,
+//         [userId],
+//         function (errMentor, resultMentor) {
+//           if (errMentor) {
+//             return connection.rollback(function () {
+//               console.error(
+//                 "Error deleting from mentors_info table:",
+//                 errMentor
+//               );
+//               response.status(500).json({ error: errMentor.message });
+//             });
+//           }
 
-          // Delete from students_info table
-          connection.query(
-            deleteStudentsQuery,
-            [mentorId],
-            function (errStudents, resultStudents) {
-              if (errStudents) {
-                return connection.rollback(function () {
-                  console.error(
-                    "Error deleting students associated with mentor:",
-                    errStudents
-                  );
-                  response.status(500).json({ error: errStudents.message });
-                });
-              }
+//           // Delete from students_info table
+//           connection.query(
+//             deleteStudentsQuery,
+//             [mentorId],
+//             function (errStudents, resultStudents) {
+//               if (errStudents) {
+//                 return connection.rollback(function () {
+//                   console.error(
+//                     "Error deleting students associated with mentor:",
+//                     errStudents
+//                   );
+//                   response.status(500).json({ error: errStudents.message });
+//                 });
+//               }
 
-              // Commit the transaction if everything is successful
-              connection.commit(function (err) {
-                if (err) {
-                  return connection.rollback(function () {
-                    console.error("Error committing transaction:", err);
-                    response.status(500).json({ error: err.message });
-                  });
-                }
+//               // Commit the transaction if everything is successful
+//               connection.commit(function (err) {
+//                 if (err) {
+//                   return connection.rollback(function () {
+//                     console.error("Error committing transaction:", err);
+//                     response.status(500).json({ error: err.message });
+//                   });
+//                 }
 
-                console.log(
-                  "Mentor and associated students deleted successfully"
-                );
-                response.json({
-                  message:
-                    "Mentor and associated students deleted successfully",
-                });
-              });
-            }
-          );
-        }
-      );
-    });
-  } catch (error) {
-    console.error("Error deleting mentor:", error);
-    response.status(500).json({ error: "Internal Server Error" });
-  }
-};
+//                 console.log(
+//                   "Mentor and associated students deleted successfully"
+//                 );
+//                 response.json({
+//                   message:
+//                     "Mentor and associated students deleted successfully",
+//                 });
+//               });
+//             }
+//           );
+//         }
+//       );
+//     });
+//   } catch (error) {
+//     console.error("Error deleting mentor:", error);
+//     response.status(500).json({ error: "Internal Server Error" });
+//   }
+// };
 
 exports.fetchMentorDetails = function (request, response) {
-  const mentorId = request.params.mentorId; // Updated parameter name to mentorId
+  const userId = request.params.userId; // Updated parameter name to userId
 
   const connection =
     connectionProvider.mysqlConnectionStringProvider.getMysqlConnection();
@@ -2353,10 +2393,10 @@ exports.fetchMentorDetails = function (request, response) {
   const selectQuery = `
     SELECT *
     FROM mentors_info
-    WHERE mentor_id = ?;
+    WHERE user_id = ?;
   `;
 
-  connection.query(selectQuery, [mentorId], (err, rows, fields) => {
+  connection.query(selectQuery, [userId], (err, rows, fields) => {
     connectionProvider.mysqlConnectionStringProvider.closeMysqlConnection(
       connection
     );
@@ -2374,3 +2414,87 @@ exports.fetchMentorDetails = function (request, response) {
 // ------------------------Working Code ---------------------------------------
 
 // ------------------------Testing Code ---------------------------------------
+
+
+exports.deleteMentor = function (request, response) {
+  try {
+    const userId = request.body.userId;
+
+    const connection =
+      connectionProvider.mysqlConnectionStringProvider.getMysqlConnection();
+
+    // Start a transaction
+    connection.beginTransaction(function (err) {
+      if (err) {
+        console.error("Error starting transaction:", err);
+        return response.status(500).json({ error: err.message });
+      }
+
+      // Update students_info table to remove mentor_id
+      const updateStudentsQuery = `
+        UPDATE students_info
+        SET mentor_id = NULL
+        WHERE mentor_id = ?;
+      `;
+
+      connection.query(
+        updateStudentsQuery,
+        [userId], // Use userId since mentors_info now has user_id
+        function (errUpdateStudents, resultUpdateStudents) {
+          if (errUpdateStudents) {
+            return connection.rollback(function () {
+              console.error(
+                "Error updating students_info table:",
+                errUpdateStudents
+              );
+              response.status(500).json({ error: errUpdateStudents.message });
+            });
+          }
+
+          // Delete from mentors_info table
+          const deleteMentorQuery = `
+            DELETE FROM mentors_info
+            WHERE user_id = ?;
+          `;
+
+          connection.query(
+            deleteMentorQuery,
+            [userId],
+            function (errDeleteMentor, resultDeleteMentor) {
+              if (errDeleteMentor) {
+                return connection.rollback(function () {
+                  console.error(
+                    "Error deleting from mentors_info table:",
+                    errDeleteMentor
+                  );
+                  response.status(500).json({ error: errDeleteMentor.message });
+                });
+              }
+
+              // Commit the transaction if everything is successful
+              connection.commit(function (errCommit) {
+                if (errCommit) {
+                  return connection.rollback(function () {
+                    console.error("Error committing transaction:", errCommit);
+                    response.status(500).json({ error: errCommit.message });
+                  });
+                }
+
+                console.log(
+                  "Mentor information removed from students_info successfully"
+                );
+                response.json({
+                  message:
+                    "Mentor information removed from students_info successfully",
+                });
+              });
+            }
+          );
+        }
+      );
+    });
+  } catch (error) {
+    console.error("Error deleting mentor:", error);
+    response.status(500).json({ error: "Internal Server Error" });
+  }
+};
