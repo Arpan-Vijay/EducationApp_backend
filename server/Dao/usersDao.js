@@ -376,10 +376,11 @@ function proceedWithAuthentication(response, user) {
     school_name: user.school_name,
     role: role,
     first_name: user.first_name,
+    aadhar_card:user.aadhar_card,
     last_name: user.last_name,
     middle_name: user.middle_name,
     email: user.email,
-    birthdate: user.birthdate,
+    birthday: user.birthday,
     contact_number: user.contact_number,
     alternative_contact_number: user.alternative_contact_number,
     permanent_address: user.permanent_address,
@@ -2411,11 +2412,6 @@ exports.fetchMentorDetails = function (request, response) {
   });
 };
 
-// ------------------------Working Code ---------------------------------------
-
-// ------------------------Testing Code ---------------------------------------
-
-
 exports.deleteMentor = function (request, response) {
   try {
     const userId = request.body.userId;
@@ -2498,3 +2494,11 @@ exports.deleteMentor = function (request, response) {
     response.status(500).json({ error: "Internal Server Error" });
   }
 };
+
+// ------------------------Working Code ---------------------------------------
+
+// ------------------------Testing Code ---------------------------------------
+
+
+
+
